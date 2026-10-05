@@ -71,7 +71,8 @@ public static class TrackFields
             (t, v) => t.TrackNumber = v,
             GetFromFileTag: t => t.Track > 0 ? (int?)t.Track : null,
             SetOnFileTag: (t, v) => t.Track = AsUint(v),
-            CoerceWrite: CoerceInt);
+            CoerceWrite: CoerceInt,
+            UpdateByDefault: true);
 
     public static readonly TrackField TrackCount =
         new("Track Count", "trackCount",
@@ -80,7 +81,8 @@ public static class TrackFields
             (t, v) => t.TrackCount = v,
             GetFromFileTag: t => t.TrackCount > 0 ? (int?)t.TrackCount : null,
             SetOnFileTag: (t, v) => t.TrackCount = AsUint(v),
-            CoerceWrite: CoerceInt);
+            CoerceWrite: CoerceInt,
+            UpdateByDefault: true);
 
     public static readonly TrackField DiscNumber =
         new("Disc Number", "discNumber",
@@ -89,7 +91,8 @@ public static class TrackFields
             (t, v) => t.DiscNumber = v,
             GetFromFileTag: t => t.Disc > 0 ? (int?)t.Disc : null,
             SetOnFileTag: (t, v) => t.Disc = AsUint(v),
-            CoerceWrite: CoerceInt);
+            CoerceWrite: CoerceInt,
+            UpdateByDefault: true);
 
     public static readonly TrackField DiscCount =
         new("Disc Count", "discCount",
@@ -98,7 +101,8 @@ public static class TrackFields
             (t, v) => t.DiscCount = v,
             GetFromFileTag: t => t.DiscCount > 0 ? (int?)t.DiscCount : null,
             SetOnFileTag: (t, v) => t.DiscCount = AsUint(v),
-            CoerceWrite: CoerceInt);
+            CoerceWrite: CoerceInt,
+            UpdateByDefault: true);
 
     /// <summary>
     /// Album artwork, exposed by the Search API as artworkUrl100. The value
@@ -110,7 +114,8 @@ public static class TrackFields
         new("Album Artwork", "artworkUrl100",
             r => r.ArtworkUrl100,
             _ => null,
-            SetOnItunes: null);
+            SetOnItunes: null,
+            UpdateByDefault: true);
 
     /// <summary>
     /// Read-only file location, shown as a grid column only (mirrors the

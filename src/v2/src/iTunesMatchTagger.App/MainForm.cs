@@ -65,8 +65,8 @@ public sealed class MainForm : Form
 
         Text = $"iTunes Match Tagger v2 - v{typeof(MainForm).Assembly.GetName().Version?.ToString(3)}";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(1240, 800);
-        MinimumSize = new Size(1080, 680);
+        ClientSize = new Size(1380, 900);
+        MinimumSize = new Size(1160, 720);
 
         BuildLayout();
 
@@ -672,13 +672,13 @@ public sealed class MainForm : Form
             var current = row.GetCurrent(field.LookupMember);
             var proposed = row.GetProposed(field.LookupMember);
             var index = _detailGrid.Rows.Add(field.DisplayName, current ?? string.Empty, proposed ?? string.Empty);
-            if (current is not null || proposed is not null)
+
+            if (proposed is not null)
             {
                 var changed = !string.Equals(current, proposed, StringComparison.Ordinal);
-                if (changed)
-                {
-                    _detailGrid.Rows[index].DefaultCellStyle.BackColor = Color.FromArgb(255, 246, 220);
-                }
+                _detailGrid.Rows[index].DefaultCellStyle.BackColor = changed
+                    ? Color.FromArgb(255, 246, 220) // will change - amber
+                    : Color.FromArgb(232, 245, 233); // identical - light green
             }
         }
 
@@ -830,7 +830,7 @@ public sealed class MainForm : Form
             RowCount = 4,
             Padding = new Padding(8),
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 225));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 300));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 110));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
@@ -863,6 +863,8 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
             CheckOnClick = true,
             IntegralHeight = false,
+            MultiColumn = true, // 134 storefronts - columns avoid long scrolling
+            ColumnWidth = 130,
         };
         foreach (var country in StoreCountries.All)
         {
@@ -912,21 +914,21 @@ public sealed class MainForm : Form
             HeaderText = "Field",
             DataPropertyName = nameof(OptionRow.FieldName),
             ReadOnly = true,
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            Width = 110,
         });
         _optionsGrid.Columns.Add(new DataGridViewCheckBoxColumn
         {
             Name = "Overwrite",
             HeaderText = "Overwrite",
             DataPropertyName = nameof(OptionRow.Overwrite),
-            Width = 68,
+            Width = 72,
         });
         _optionsGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "OverwriteValue",
             HeaderText = "Value",
             DataPropertyName = nameof(OptionRow.OverwriteValue),
-            Width = 90,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
         });
         _optionsGrid.DataSource = _options;
         optionsGroup.Controls.Add(_optionsGrid);
@@ -964,55 +966,35 @@ public sealed class MainForm : Form
         var detail = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 3,
+            ColumnCount = 2,
+            RowCount = 2,
         };
-        detail.RowStyles.Add(new RowStyle(SizeType.Absolute, 180));
-        detail.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+        detail.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         detail.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        detail.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 215));
+        detail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
         _statusLabel = new Label
         {
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            AutoEllipsis = true,
             Padding = new Padding(4, 0, 0, 0),
         };
+        detail.Controls.Add(_statusLabel, 0, 0);
+        detail.SetColumnSpan(_statusLabel, 2);
 
-        detail.Controls.Add(BuildArtworkComparePanel(), 0, 0);
-        detail.Controls.Add(_statusLabel, 0, 1);
-        detail.Controls.Add(BuildCompareGrid(), 0, 2);
-
-        _splitter.Panel2.Controls.Add(detail);
-
-        return _splitter;
-    }
-
-    protected override void OnShown(EventArgs e)
-    {
-        // SplitterDistance is only reliable once the form has final layout
-        // (setting it in the constructor silently failed)
-        base.OnShown(e);
-        try
-        {
-            _splitter.SplitterDistance = 340;
-        }
-        catch (InvalidOperationException)
-        {
-            // keep the default split; user can drag
-        }
-    }
-
-    private Control BuildArtworkComparePanel()
-    {
-        var panel = new TableLayoutPanel
+        // artwork previews stacked vertically; the comparison grid sits
+        // horizontally next to them and uses the full remaining width
+        var artworkColumn = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1,
+            ColumnCount = 1,
+            RowCount = 2,
         };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        artworkColumn.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        artworkColumn.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
 
         var currentGroup = new GroupBox
         {
@@ -1038,9 +1020,30 @@ public sealed class MainForm : Form
         };
         newGroup.Controls.Add(_artworkNewPic);
 
-        panel.Controls.Add(currentGroup, 0, 0);
-        panel.Controls.Add(newGroup, 1, 0);
-        return panel;
+        artworkColumn.Controls.Add(currentGroup, 0, 0);
+        artworkColumn.Controls.Add(newGroup, 0, 1);
+
+        detail.Controls.Add(artworkColumn, 0, 1);
+        detail.Controls.Add(BuildCompareGrid(), 1, 1);
+
+        _splitter.Panel2.Controls.Add(detail);
+
+        return _splitter;
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        // SplitterDistance is only reliable once the form has final layout
+        // (setting it in the constructor silently failed)
+        base.OnShown(e);
+        try
+        {
+            _splitter.SplitterDistance = 340;
+        }
+        catch (InvalidOperationException)
+        {
+            // keep the default split; user can drag
+        }
     }
 
     private Control BuildCompareGrid()

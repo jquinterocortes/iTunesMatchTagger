@@ -15,15 +15,10 @@ public class TrackFieldsTests
     }
 
     [Fact]
-    public void Visible_MatchesUpstreamDefaults()
+    public void Visible_AllFieldsCheckedByDefault()
     {
-        // upstream InitUpdateOptions(): these six had update = true
-        var expectedDefaultOn = new[] { "trackName", "artistName", "AlbumArtist", "collectionName", "year", "primaryGenreName" };
-
-        foreach (var field in TrackFields.All)
-        {
-            Assert.Equal(expectedDefaultOn.Contains(field.LookupMember), field.UpdateByDefault);
-        }
+        // product decision: every offered field is written by default
+        Assert.All(TrackFields.Visible, static f => Assert.True(f.UpdateByDefault));
 
         // upstream "Filename" option had ShowOption = false
         var filename = Assert.Single(TrackFields.All, f => f.LookupMember == "Filename");
