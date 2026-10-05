@@ -1,0 +1,185 @@
+﻿<?xml version='1.0' encoding='utf-8'?>
+<SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="iTunesMatchTagger" GeneratedClassName="Settings">
+  <Profiles />
+  <Settings>
+    <Setting Name="StoreCountries" Type="System.Collections.Specialized.StringCollection" Scope="User">
+      <Value Profile="(Default)">&lt;?xml version="1.0" encoding="utf-16"?&gt;
+&lt;ArrayOfString xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"&gt;
+  &lt;string&gt;US&lt;/string&gt;
+  &lt;string&gt;GB&lt;/string&gt;
+  &lt;string&gt;AU&lt;/string&gt;
+  &lt;string&gt;FR&lt;/string&gt;
+  &lt;string&gt;DE&lt;/string&gt;
+  &lt;string&gt;CA&lt;/string&gt;
+  &lt;string&gt;IT&lt;/string&gt;
+  &lt;string&gt;JP&lt;/string&gt;
+  &lt;string&gt;DZ&lt;/string&gt;
+  &lt;string&gt;AO&lt;/string&gt;
+  &lt;string&gt;AI&lt;/string&gt;
+  &lt;string&gt;AG&lt;/string&gt;
+  &lt;string&gt;AR&lt;/string&gt;
+  &lt;string&gt;AM&lt;/string&gt;
+  &lt;string&gt;AT&lt;/string&gt;
+  &lt;string&gt;AZ&lt;/string&gt;
+  &lt;string&gt;BS&lt;/string&gt;
+  &lt;string&gt;BH&lt;/string&gt;
+  &lt;string&gt;BD&lt;/string&gt;
+  &lt;string&gt;BB&lt;/string&gt;
+  &lt;string&gt;BY&lt;/string&gt;
+  &lt;string&gt;BE&lt;/string&gt;
+  &lt;string&gt;BZ&lt;/string&gt;
+  &lt;string&gt;BM&lt;/string&gt;
+  &lt;string&gt;BO&lt;/string&gt;
+  &lt;string&gt;BW&lt;/string&gt;
+  &lt;string&gt;BR&lt;/string&gt;
+  &lt;string&gt;BN&lt;/string&gt;
+  &lt;string&gt;BG&lt;/string&gt;
+  &lt;string&gt;CM&lt;/string&gt;
+  &lt;string&gt;KY&lt;/string&gt;
+  &lt;string&gt;CL&lt;/string&gt;
+  &lt;string&gt;CN&lt;/string&gt;
+  &lt;string&gt;CO&lt;/string&gt;
+  &lt;string&gt;CR&lt;/string&gt;
+  &lt;string&gt;CI&lt;/string&gt;
+  &lt;string&gt;HR&lt;/string&gt;
+  &lt;string&gt;CY&lt;/string&gt;
+  &lt;string&gt;CZ&lt;/string&gt;
+  &lt;string&gt;DK&lt;/string&gt;
+  &lt;string&gt;DM&lt;/string&gt;
+  &lt;string&gt;DO&lt;/string&gt;
+  &lt;string&gt;EC&lt;/string&gt;
+  &lt;string&gt;EG&lt;/string&gt;
+  &lt;string&gt;SV&lt;/string&gt;
+  &lt;string&gt;EE&lt;/string&gt;
+  &lt;string&gt;ET&lt;/string&gt;
+  &lt;string&gt;FI&lt;/string&gt;
+  &lt;string&gt;GH&lt;/string&gt;
+  &lt;string&gt;GR&lt;/string&gt;
+  &lt;string&gt;GD&lt;/string&gt;
+  &lt;string&gt;GT&lt;/string&gt;
+  &lt;string&gt;GY&lt;/string&gt;
+  &lt;string&gt;HN&lt;/string&gt;
+  &lt;string&gt;HK&lt;/string&gt;
+  &lt;string&gt;HU&lt;/string&gt;
+  &lt;string&gt;IS&lt;/string&gt;
+  &lt;string&gt;IN&lt;/string&gt;
+  &lt;string&gt;ID&lt;/string&gt;
+  &lt;string&gt;IE&lt;/string&gt;
+  &lt;string&gt;IL&lt;/string&gt;
+  &lt;string&gt;JM&lt;/string&gt;
+  &lt;string&gt;JO&lt;/string&gt;
+  &lt;string&gt;KZ&lt;/string&gt;
+  &lt;string&gt;KE&lt;/string&gt;
+  &lt;string&gt;KR&lt;/string&gt;
+  &lt;string&gt;KW&lt;/string&gt;
+  &lt;string&gt;LV&lt;/string&gt;
+  &lt;string&gt;LB&lt;/string&gt;
+  &lt;string&gt;LY&lt;/string&gt;
+  &lt;string&gt;LI&lt;/string&gt;
+  &lt;string&gt;LT&lt;/string&gt;
+  &lt;string&gt;LU&lt;/string&gt;
+  &lt;string&gt;MO&lt;/string&gt;
+  &lt;string&gt;MK&lt;/string&gt;
+  &lt;string&gt;MG&lt;/string&gt;
+  &lt;string&gt;MY&lt;/string&gt;
+  &lt;string&gt;MV&lt;/string&gt;
+  &lt;string&gt;ML&lt;/string&gt;
+  &lt;string&gt;MT&lt;/string&gt;
+  &lt;string&gt;MU&lt;/string&gt;
+  &lt;string&gt;MX&lt;/string&gt;
+  &lt;string&gt;MD&lt;/string&gt;
+  &lt;string&gt;MS&lt;/string&gt;
+  &lt;string&gt;MM&lt;/string&gt;
+  &lt;string&gt;NP&lt;/string&gt;
+  &lt;string&gt;NL&lt;/string&gt;
+  &lt;string&gt;NZ&lt;/string&gt;
+  &lt;string&gt;NI&lt;/string&gt;
+  &lt;string&gt;NE&lt;/string&gt;
+  &lt;string&gt;NG&lt;/string&gt;
+  &lt;string&gt;NO&lt;/string&gt;
+  &lt;string&gt;OM&lt;/string&gt;
+  &lt;string&gt;PK&lt;/string&gt;
+  &lt;string&gt;PA&lt;/string&gt;
+  &lt;string&gt;PY&lt;/string&gt;
+  &lt;string&gt;PE&lt;/string&gt;
+  &lt;string&gt;PH&lt;/string&gt;
+  &lt;string&gt;PL&lt;/string&gt;
+  &lt;string&gt;PT&lt;/string&gt;
+  &lt;string&gt;QA&lt;/string&gt;
+  &lt;string&gt;RO&lt;/string&gt;
+  &lt;string&gt;RU&lt;/string&gt;
+  &lt;string&gt;KN&lt;/string&gt;
+  &lt;string&gt;LC&lt;/string&gt;
+  &lt;string&gt;VC&lt;/string&gt;
+  &lt;string&gt;SA&lt;/string&gt;
+  &lt;string&gt;SN&lt;/string&gt;
+  &lt;string&gt;RS&lt;/string&gt;
+  &lt;string&gt;SG&lt;/string&gt;
+  &lt;string&gt;SK&lt;/string&gt;
+  &lt;string&gt;SI&lt;/string&gt;
+  &lt;string&gt;ZA&lt;/string&gt;
+  &lt;string&gt;ES&lt;/string&gt;
+  &lt;string&gt;LK&lt;/string&gt;
+  &lt;string&gt;SR&lt;/string&gt;
+  &lt;string&gt;SE&lt;/string&gt;
+  &lt;string&gt;CH&lt;/string&gt;
+  &lt;string&gt;TW&lt;/string&gt;
+  &lt;string&gt;TZ&lt;/string&gt;
+  &lt;string&gt;TH&lt;/string&gt;
+  &lt;string&gt;TT&lt;/string&gt;
+  &lt;string&gt;TN&lt;/string&gt;
+  &lt;string&gt;TR&lt;/string&gt;
+  &lt;string&gt;TC&lt;/string&gt;
+  &lt;string&gt;UG&lt;/string&gt;
+  &lt;string&gt;UA&lt;/string&gt;
+  &lt;string&gt;AE&lt;/string&gt;
+  &lt;string&gt;UY&lt;/string&gt;
+  &lt;string&gt;UZ&lt;/string&gt;
+  &lt;string&gt;VE&lt;/string&gt;
+  &lt;string&gt;VN&lt;/string&gt;
+  &lt;string&gt;VG&lt;/string&gt;
+  &lt;string&gt;YE&lt;/string&gt;
+&lt;/ArrayOfString&gt;</Value>
+    </Setting>
+    <Setting Name="MatchedKindAsString" Type="System.Collections.Specialized.StringCollection" Scope="User">
+      <Value Profile="(Default)">&lt;?xml version="1.0" encoding="utf-16"?&gt;
+&lt;ArrayOfString xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"&gt;
+  &lt;string&gt;Usklađena AAC audio datoteka&lt;/string&gt;
+  &lt;string&gt;Egyező AAC-hangfájl&lt;/string&gt;
+  &lt;string&gt;File audio AAC corrispondente&lt;/string&gt;
+  &lt;string&gt;マッチした AAC オーディオファイル&lt;/string&gt;
+  &lt;string&gt;AAC-Audiodatei (passend)&lt;/string&gt;
+  &lt;string&gt;Αντιστοιχισμένο αρχείο ήχου AAC&lt;/string&gt;
+  &lt;string&gt;Matched AAC audio file&lt;/string&gt;
+  &lt;string&gt;Archivo de audio AAC coincidente&lt;/string&gt;
+  &lt;string&gt;Täsmäävä AAC-äänitiedosto&lt;/string&gt;
+  &lt;string&gt;Fichier audio AAC mis en correspondance&lt;/string&gt;
+  &lt;string&gt;Fitxer d’àudio AAC aparellat&lt;/string&gt;
+  &lt;string&gt;Nahrazený soubor AAC audio&lt;/string&gt;
+  &lt;string&gt;Matchet AAC-lydfil&lt;/string&gt;
+  &lt;string&gt;Matched AAC audio file&lt;/string&gt;
+  &lt;string&gt;Eşleştirilen AAC ses dosyası&lt;/string&gt;
+  &lt;string&gt;Зіставлений аудіофайл AAC&lt;/string&gt;
+  &lt;string&gt;匹配的 AAC 音频文件&lt;/string&gt;
+  &lt;string&gt;比對成功的 AAC 音訊檔&lt;/string&gt;
+  &lt;string&gt;Найдено совпадение аудиофайла AAC&lt;/string&gt;
+  &lt;string&gt;Zhodný AAC audiosúbor&lt;/string&gt;
+  &lt;string&gt;Matchad AAC-ljudfil&lt;/string&gt;
+  &lt;string&gt;ไฟล์เสียง AAC ที่ตรงกัน&lt;/string&gt;
+  &lt;string&gt;Gematcht AAC-audiobestand&lt;/string&gt;
+  &lt;string&gt;dopasowany plik audio AAC&lt;/string&gt;
+  &lt;string&gt;Arq. áudio AAC dispon.&lt;/string&gt;
+  &lt;string&gt;Ficheiro de áudio AAC do iTunes Match&lt;/string&gt;
+  &lt;string&gt;fișier audio AAC corelat&lt;/string&gt;
+  &lt;string&gt;일치하는 AAC 오디오 파일&lt;/string&gt;
+  &lt;string&gt;Matchet AAC-lydfil&lt;/string&gt;
+&lt;/ArrayOfString&gt;</Value>
+    </Setting>
+    <Setting Name="ProjectUrl" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">http://code.google.com/p/itunes-match-tagger</Value>
+    </Setting>
+    <Setting Name="AuthorEmail" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">schirkan@googlemail.com</Value>
+    </Setting>
+  </Settings>
+</SettingsFile>

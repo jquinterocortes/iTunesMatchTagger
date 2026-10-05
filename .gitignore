@@ -1,0 +1,15 @@
+# Build artifacts
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+
+# IDE
+.vs/
+
+# Legacy SVN metadata (upstream was developed on Google Code SVN)
+.svn/
+
+# Windows shell files
+desktop.ini
+Thumbs.db
