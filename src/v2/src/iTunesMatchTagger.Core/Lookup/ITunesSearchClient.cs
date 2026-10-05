@@ -10,6 +10,7 @@ namespace iTunesMatchTagger.Core.Lookup;
 public sealed class ITunesSearchClient : IDisposable
 {
     public const string LookupUrl = "https://itunes.apple.com/lookup";
+    public const string SearchUrl = "https://itunes.apple.com/search";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -33,22 +34,24 @@ public sealed class ITunesSearchClient : IDisposable
     /// </summary>
     public async Task<ITunesLookupResult?> LookupTrackAsync(long trackId, string country, CancellationToken cancellationToken = default)
     {
-        var results = await QueryAsync($"id={trackId}&country={country}", cancellationToken).ConfigureAwait(false);
+        var results = await QueryAsync($"{LookupUrl}?id={trackId}&country={country}", cancellationToken).ConfigureAwait(false);
         return results.Count > 0 ? results[0] : null;
     }
 
     /// <summary>
-    /// Free-text search (artist/album/title) in the given storefront.
-    /// Used by standalone mode for files without an embedded Track ID.
+    /// Free-text search (artist/album/title) in the given storefront, via
+    /// the /search endpoint (the /lookup endpoint only accepts ids).
+    /// Used by standalone mode and as a fallback when an embedded Track ID
+    /// is no longer listed in the catalog.
     /// </summary>
     public async Task<List<ITunesLookupResult>> SearchAsync(string term, string country, CancellationToken cancellationToken = default)
     {
-        return await QueryAsync($"term={Uri.EscapeDataString(term)}&country={country}&limit=5", cancellationToken).ConfigureAwait(false);
+        return await QueryAsync($"{SearchUrl}?term={Uri.EscapeDataString(term)}&country={country}&limit=5", cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<List<ITunesLookupResult>> QueryAsync(string query, CancellationToken cancellationToken)
+    private async Task<List<ITunesLookupResult>> QueryAsync(string url, CancellationToken cancellationToken)
     {
-        using var response = await _httpClient.GetAsync($"{LookupUrl}?{query}", cancellationToken).ConfigureAwait(false);
+        using var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);

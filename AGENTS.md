@@ -62,6 +62,12 @@ Instructions for AI coding agents working in this repository.
   launching it and killing it after a few seconds.
 - App settings: JSON at `%AppData%\iTunesMatchTagger\settings.json`
   (`AppSettings`), not app.config.
+- iTunes Search API: `/lookup` only accepts `id=`/`amgArtistId=`; text
+  search is the separate `/search?term=` endpoint. An embedded Track ID
+  dies when Apple delists an album — `/lookup` then returns
+  `resultCount: 0` in every storefront (v1 had the same behavior); v2
+  falls back to `/search` with the current tags, which also finds albums
+  re-released under a new ID.
 - Runtime prerequisites to verify the full workflow: Windows + .NET 10
   Desktop Runtime + iTunes running with iTunes Match tracks selected.
 

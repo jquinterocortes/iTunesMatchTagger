@@ -163,14 +163,20 @@ public sealed class MainForm : Form
 
     private void BindRows(IEnumerable<ITaggableTrack> tracks)
     {
+        // Rebind from scratch: assigning the same List instance would leave
+        // the grid showing stale rows (List<T> has no change notification).
+        _tracksGrid.DataSource = null;
         _rows.Clear();
         _rows.AddRange(tracks.Select(t => new TrackRow(t)));
-
         _tracksGrid.DataSource = _rows;
         _tracksGrid.Refresh();
         ValidateRows();
 
         Log($"{_rows.Count} track(s) loaded.");
+        foreach (var row in _rows)
+        {
+            LogDebug($"{row.File} -> Track ID {row.Track.TrackId}{(row.Track.TrackId > 0 ? "" : " (none)")}");
+        }
     }
 
     private void ValidateRows()
@@ -283,25 +289,32 @@ public sealed class MainForm : Form
                 }
             }
 
-            return null;
+            // The embedded ID is dead in every selected storefront (Apple
+            // delists albums; the file keeps the old ID). Fall back to
+            // searching by the current tags - re-released albums come back
+            // under a new ID that this lookup would otherwise never find.
+            Log($"Track ID {row.Track.TrackId} not found in any selected country, trying search by current tags: {row.File}", LogSeverity.Information);
+        }
+        else
+        {
+            Log($"No embedded Track ID, searching by current tags: {row.File}", LogSeverity.Information);
         }
 
-        // Standalone fallback for files without an embedded ID: search by
-        // the tags currently on the file.
+        // Fallback: search by the tags currently on the track/file.
         var term = $"{row.ArtistName} {row.TrackName}".Trim();
         if (term.Length == 0)
         {
-            Log($"No Track ID and no tags to search for: {row.File}", LogSeverity.Warning);
+            Log($"No tags to search for: {row.File}", LogSeverity.Warning);
             return null;
         }
 
         foreach (var country in countries)
         {
             var results = await _search.SearchAsync(term, country, cancellationToken).ConfigureAwait(false);
-            var first = results.FirstOrDefault();
+            var first = results.FirstOrDefault(static r => r.Kind is null or "song");
             if (first is not null)
             {
-                LogDebug($"Term '{term}' found in {country}: {row.File}");
+                LogDebug($"Term '{term}' found in {country}: {row.File} (catalog Track ID {first.TrackId})");
                 return first;
             }
         }
@@ -325,6 +338,10 @@ public sealed class MainForm : Form
                     row.SetValue(option.Field.LookupMember, value.ToString());
                 }
             }
+        }
+        else
+        {
+            Log($"Not found: {row.File} (Track ID {row.Track.TrackId})", LogSeverity.Information);
         }
 
         _progress.PerformStep();

@@ -134,7 +134,7 @@ public class ITunesSearchClientTests
 
         Assert.NotNull(handler.LastRequest);
         Assert.Equal(
-            "https://itunes.apple.com/lookup?term=Jack%20Johnson%20Upside%20Down&country=GB&limit=5",
+            "https://itunes.apple.com/search?term=Jack%20Johnson%20Upside%20Down&country=GB&limit=5",
             handler.LastRequest.RequestUri?.AbsoluteUri);
     }
 
