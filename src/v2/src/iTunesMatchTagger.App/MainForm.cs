@@ -37,7 +37,7 @@ public sealed class MainForm : Form
         string FoundIn,
         bool FoundViaSearch,
         long? AppleTrackId,
-        byte[]? ArtworkBytes);
+        IReadOnlyDictionary<int, byte[]> ArtworkPreviews);
 
     private readonly ITunesComClient _itunes = new();
     private readonly ITunesSearchClient _search = new();
@@ -57,8 +57,10 @@ public sealed class MainForm : Form
     private ListBox _trackList = new();
     private SplitContainer _splitter = new();
     private DataGridView _detailGrid = new();
-    private PictureBox _artworkCurrentPic = new();
-    private PictureBox _artworkNewPic = new();
+    private readonly Dictionary<string, DataGridViewColumn> _sourceColumns = new(StringComparer.Ordinal);
+    private Panel _artworkStrip = new();
+    private readonly Dictionary<string, PictureBox> _sourceArtworkPics = new(StringComparer.Ordinal);
+    private PictureBox _currentArtworkStripPic = new();
     private Label _statusLabel = new();
     private TextBox _log = new();
     private ProgressBar _progress = new();
@@ -497,17 +499,24 @@ public sealed class MainForm : Form
             }
         }
 
-        byte[]? artworkBytes = null;
-        var previewUrl = candidates.Count > 0 ? candidates[0].ArtworkUrl : null;
-        if (previewUrl is not null)
+        // 300px preview for every source's displayed candidate (its first by
+        // default), so the artwork strip can show all sources at once
+        var previews = new Dictionary<int, byte[]>();
+        foreach (var sourceId in _sourceColumns.Keys)
         {
+            var candidateIndex = candidates.FindIndex(c => c.SourceId == sourceId);
+            if (candidateIndex < 0 || candidates[candidateIndex].ArtworkUrl is not { } url)
+            {
+                continue;
+            }
+
             try
             {
-                artworkBytes = await DownloadArtworkAsync(previewUrl, 300, cancellationToken).ConfigureAwait(false);
+                previews[candidateIndex] = await DownloadArtworkAsync(url, 300, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
             {
-                LogDebug($"Artwork preview download failed: {ex.Message}");
+                LogDebug($"Artwork preview download failed ({sourceId}): {ex.Message}");
             }
         }
 
@@ -517,7 +526,7 @@ public sealed class MainForm : Form
             foundIn,
             viaSearch,
             appleResult?.TrackId,
-            artworkBytes);
+            previews);
     }
 
     /// <summary>
@@ -541,23 +550,19 @@ public sealed class MainForm : Form
         {
             row.LookupSuccess = true;
             row.SetCandidates(candidates, 0);
-            row.SetArtworkImage(ToImage(outcome.ArtworkBytes));
 
-            var selected = row.SelectedCandidate!;
-            row.SetStatus(
-                selected.SourceId == TagSources.ITunes
-                    ? outcome.FoundViaSearch
-                        ? $"Found via search in {outcome.FoundIn} (catalog ID {outcome.AppleTrackId})"
-                        : $"Found in {outcome.FoundIn}"
-                    : $"Found on {selected.SourceId} - {candidates.Count} candidate(s), pick one in the detail panel",
-                StatusKind.Success);
+            foreach (var (candidateIndex, bytes) in outcome.ArtworkPreviews)
+            {
+                row.SetCandidateArtwork(candidateIndex, ToImage(bytes));
+            }
+
+            row.SetStatus(BuildLookupStatus(row, outcome), StatusKind.Success);
         }
         else
         {
             row.LookupSuccess = false;
             row.ClearProposed();
             row.SetCandidates([], -1);
-            row.SetArtworkImage(null);
             row.SetStatus("Not found on Apple or the enabled tag sources", StatusKind.Error);
             Log($"Not found: {row.File} (Track ID {row.Track.TrackId})", LogSeverity.Information);
         }
@@ -567,6 +572,16 @@ public sealed class MainForm : Form
         {
             FillDetail(row);
         }
+    }
+
+    private string BuildLookupStatus(TrackRow row, LookupOutcome outcome)
+    {
+        var active = row.ActiveCandidate!;
+        return active.SourceId == TagSources.ITunes
+            ? outcome.FoundViaSearch
+                ? $"Found via search in {outcome.FoundIn} (catalog ID {outcome.AppleTrackId})"
+                : $"Found in {outcome.FoundIn}"
+            : $"Found on {active.SourceId} - {row.Candidates.Count} candidate(s), pick one in the detail panel";
     }
 
     // ------------------------------------------------------------------
@@ -802,15 +817,20 @@ public sealed class MainForm : Form
 
         if (row is null)
         {
-            _artworkCurrentPic.Image = null;
-            _artworkNewPic.Image = null;
+            _currentArtworkStripPic.Image = null;
+            foreach (var pic in _sourceArtworkPics.Values)
+            {
+                pic.Image = null;
+            }
+
             _statusLabel.Text = "Select a track to review its tags.";
             _statusLabel.ForeColor = SystemColors.ControlText;
+            AlignArtworkStrip();
             return;
         }
 
-        _artworkCurrentPic.Image = row.CurrentArtworkImage;
-        _artworkNewPic.Image = row.ArtworkImage;
+        _currentArtworkStripPic.Image = row.CurrentArtworkImage;
+        RefreshArtworkStrip(row);
 
         _statusLabel.Text = row.StatusMessage.Length == 0
             ? "No lookup yet - click \"2. Lookup tracks\"."
@@ -822,7 +842,21 @@ public sealed class MainForm : Form
             StatusKind.Error => Color.FromArgb(192, 0, 0),
             _ => SystemColors.ControlText,
         };
+        AlignArtworkStrip();
     }
+
+    /// <summary>Sets each strip picture from the candidate it shows.</summary>
+    private void RefreshArtworkStrip(TrackRow row)
+    {
+        foreach (var (sourceId, pic) in _sourceArtworkPics)
+        {
+            var candidateIndex = row.CandidateIndexForSource(sourceId);
+            pic.Image = candidateIndex < 0 ? null : row.GetCandidateArtwork(candidateIndex);
+        }
+    }
+
+    /// <summary>Short strip label for a source.</summary>
+    private static string StripLabel(TagSourceInfo source) => source.Id == TagSources.ITunes ? "Apple" : source.DisplayName;
 
     private void RefreshCandidatePicker(TrackRow? row)
     {
@@ -841,7 +875,7 @@ public sealed class MainForm : Form
                 _candidatePicker.Items.Add($"[{candidate.SourceId}] {summary}");
             }
 
-            _candidatePicker.SelectedIndex = Math.Max(0, row.SelectedCandidateIndex);
+            _candidatePicker.SelectedIndex = Math.Max(0, row.ActiveCandidateIndex);
         }
 
         _candidatePicker.SelectedIndexChanged += CandidatePicker_SelectedIndexChanged;
@@ -856,7 +890,7 @@ public sealed class MainForm : Form
         }
 
         var index = _candidatePicker.SelectedIndex;
-        if (index == row.SelectedCandidateIndex)
+        if (index < 0 || index == row.ActiveCandidateIndex)
         {
             return;
         }
@@ -864,27 +898,28 @@ public sealed class MainForm : Form
         row.SelectCandidate(index);
         _trackList.Invalidate();
         RefreshCompareGrid(row);
+        HighlightActiveSource(row.ActiveCandidate?.SourceId);
 
-        var candidate = row.SelectedCandidate;
-        if (candidate?.ArtworkUrl is not null)
+        var candidate = row.ActiveCandidate;
+        if (candidate is not null && row.GetCandidateArtwork(index) is null && candidate.ArtworkUrl is not null)
         {
-            _ = LoadCandidateArtworkAsync(row, candidate.ArtworkUrl);
+            _ = LoadCandidateArtworkAsync(row, index, candidate.ArtworkUrl);
         }
     }
 
-    /// <summary>Downloads the selected candidate's artwork preview and updates the UI when done.</summary>
-    private async Task LoadCandidateArtworkAsync(TrackRow row, string artworkUrl)
+    /// <summary>Downloads a candidate's artwork preview and updates its picture when done.</summary>
+    private async Task LoadCandidateArtworkAsync(TrackRow row, int candidateIndex, string artworkUrl)
     {
         try
         {
             var bytes = await DownloadArtworkAsync(artworkUrl, 300, CancellationToken.None).ConfigureAwait(true);
+            var image = ToImage(bytes);
             BeginInvoke(new Action(() =>
             {
-                if (ReferenceEquals(SelectedRow(), row) &&
-                    string.Equals(row.SelectedCandidate?.ArtworkUrl, artworkUrl, StringComparison.Ordinal))
+                row.SetCandidateArtwork(candidateIndex, image);
+                RefreshArtworkStrip(row);
+                if (row.ActiveCandidateIndex == candidateIndex)
                 {
-                    row.SetArtworkImage(ToImage(bytes));
-                    FillDetail(row);
                     _trackList.Invalidate();
                 }
             }));
@@ -908,25 +943,72 @@ public sealed class MainForm : Form
         {
             if (field.LookupMember == "Filename" || field == TrackFields.Artwork)
             {
-                continue; // the list shows the file; artwork is shown as pictures
+                continue; // the list shows the file; artwork is shown in the strip
             }
 
             var current = row.GetCurrent(field.LookupMember);
-            var proposed = row.GetProposed(field.LookupMember);
-            var index = _detailGrid.Rows.Add(row.IsFieldEnabled(field.LookupMember), field.DisplayName, current ?? string.Empty, proposed ?? string.Empty);
 
-            if (proposed is not null)
+            // per-source cells: each shows the source's picked candidate
+            // value, empty when that source produced nothing (still visible)
+            // values array is fully initialized before use
+            var values = new object[2 + _sourceColumns.Count];
+            values[0] = row.IsFieldEnabled(field.LookupMember);
+            values[1] = field.DisplayName;
+            values[2] = current ?? string.Empty;
+
+            var columnIndex = 3;
+            foreach (var sourceId in _sourceColumns.Keys)
             {
-                var changed = !string.Equals(current, proposed, StringComparison.Ordinal);
-                _detailGrid.Rows[index].DefaultCellStyle.BackColor = changed
-                    ? Color.FromArgb(255, 246, 220) // will change - amber
-                    : Color.FromArgb(232, 245, 233); // identical - light green
+                var candidate = row.CandidateForSource(sourceId);
+                var value = candidate is null ? string.Empty : field.GetFromCandidate?.Invoke(candidate)?.ToString() ?? string.Empty;
+                values[columnIndex] = value;
+                columnIndex++;
+            }
+
+            var index = _detailGrid.Rows.Add(values!);
+
+            columnIndex = 3;
+            foreach (var sourceId in _sourceColumns.Keys)
+            {
+                var cell = _detailGrid.Rows[index].Cells[columnIndex];
+                var candidate = row.CandidateForSource(sourceId);
+                if (candidate is null)
+                {
+                    cell.Style.ForeColor = SystemColors.ControlDark; // source had no results
+                }
+                else
+                {
+                    var proposed = (string?)cell.Value;
+                    if (!string.IsNullOrEmpty(proposed))
+                    {
+                        var changed = !string.Equals(current, proposed, StringComparison.Ordinal);
+                        cell.Style.BackColor = changed
+                            ? Color.FromArgb(255, 246, 220) // will change - amber
+                            : Color.FromArgb(232, 245, 233); // identical - light green
+                    }
+                }
+
+                columnIndex++;
             }
 
             if (!row.IsFieldEnabled(field.LookupMember))
             {
                 _detailGrid.Rows[index].DefaultCellStyle.ForeColor = SystemColors.GrayText;
             }
+        }
+
+        HighlightActiveSource(row.ActiveCandidate?.SourceId);
+    }
+
+    /// <summary>Marks the active candidate's source column as the write target.</summary>
+    private void HighlightActiveSource(string? activeSourceId)
+    {
+        foreach (var (sourceId, column) in _sourceColumns)
+        {
+            var active = sourceId == activeSourceId;
+            column.HeaderCell.Style.BackColor = active ? Color.FromArgb(255, 224, 178) : Color.Empty;
+            column.HeaderCell.Style.ForeColor = active ? Color.FromArgb(120, 70, 0) : Color.Empty;
+            column.HeaderCell.Style.Font = new Font(_detailGrid.Font, active ? FontStyle.Bold : FontStyle.Regular);
         }
     }
 
@@ -1083,9 +1165,9 @@ public sealed class MainForm : Form
             ColumnCount = 3,
             RowCount = 1,
         };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 18));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
 
         var countriesGroup = new GroupBox
         {
@@ -1130,6 +1212,7 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
             CheckOnClick = true,
             IntegralHeight = false,
+            DisplayMember = nameof(TagSourceInfo.DisplayName),
         };
         foreach (var source in TagSourceCatalog.All.Where(static s => s.Id != TagSources.ITunes))
         {
@@ -1242,18 +1325,20 @@ public sealed class MainForm : Form
         _trackList.SelectedIndexChanged += TrackList_SelectedIndexChanged;
         _splitter.Panel1.Controls.Add(_trackList);
 
+        // Row 0: status ("Found...") with the Result picker docked at its
+        // right; Row 1: the comparison grid stretched over the full width;
+        // Row 2: artworks aligned under the grid's columns.
         var detail = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 1,
             RowCount = 3,
         };
-        detail.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         detail.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
         detail.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        detail.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 215));
-        detail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        detail.RowStyles.Add(new RowStyle(SizeType.Absolute, 210));
 
+        var statusBar = new Panel { Dock = DockStyle.Fill };
         _statusLabel = new Label
         {
             Dock = DockStyle.Fill,
@@ -1262,76 +1347,139 @@ public sealed class MainForm : Form
             AutoEllipsis = true,
             Padding = new Padding(4, 0, 0, 0),
         };
-        detail.Controls.Add(_statusLabel, 0, 0);
-        detail.SetColumnSpan(_statusLabel, 2);
 
-        var candidateBar = new FlowLayoutPanel
+        var pickerHost = new Panel
+        {
+            Dock = DockStyle.Right,
+            Width = 430,
+            Padding = new Padding(0, 3, 0, 3),
+        };
+        var pickerFlow = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false,
         };
-        candidateBar.Controls.Add(new Label
+        pickerFlow.Controls.Add(new Label
         {
             Text = "Result:",
             AutoSize = true,
-            Margin = new Padding(4, 6, 6, 0),
+            Margin = new Padding(3, 6, 4, 0),
             ForeColor = SystemColors.GrayText,
         });
         _candidatePicker = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Width = 520,
+            Width = 370,
         };
         _candidatePicker.SelectedIndexChanged += CandidatePicker_SelectedIndexChanged;
-        candidateBar.Controls.Add(_candidatePicker);
-        detail.Controls.Add(candidateBar, 0, 1);
-        detail.SetColumnSpan(candidateBar, 2);
+        pickerFlow.Controls.Add(_candidatePicker);
+        pickerHost.Controls.Add(pickerFlow);
+        statusBar.Controls.Add(pickerHost);
+        statusBar.Controls.Add(_statusLabel);
+        detail.Controls.Add(statusBar, 0, 0);
 
-        // artwork previews stacked vertically; the comparison grid sits
-        // horizontally next to them and uses the full remaining width
-        var artworkColumn = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-        };
-        artworkColumn.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        artworkColumn.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-
-        var currentGroup = new GroupBox
-        {
-            Text = "Current artwork",
-            Dock = DockStyle.Fill,
-        };
-        _artworkCurrentPic = new PictureBox
-        {
-            Dock = DockStyle.Fill,
-            SizeMode = PictureBoxSizeMode.Zoom,
-        };
-        currentGroup.Controls.Add(_artworkCurrentPic);
-
-        var newGroup = new GroupBox
-        {
-            Text = "New (from candidate)",
-            Dock = DockStyle.Fill,
-        };
-        _artworkNewPic = new PictureBox
-        {
-            Dock = DockStyle.Fill,
-            SizeMode = PictureBoxSizeMode.Zoom,
-        };
-        newGroup.Controls.Add(_artworkNewPic);
-
-        artworkColumn.Controls.Add(currentGroup, 0, 0);
-        artworkColumn.Controls.Add(newGroup, 0, 1);
-
-        detail.Controls.Add(artworkColumn, 0, 2);
-        detail.Controls.Add(BuildCompareGrid(), 1, 2);
+        detail.Controls.Add(BuildCompareGrid(), 0, 1);
+        detail.Controls.Add(BuildArtworkStrip(), 0, 2);
 
         _splitter.Panel2.Controls.Add(detail);
 
         return _splitter;
+    }
+
+    /// <summary>
+    /// The row of artwork previews below the comparison grid: "Current" and
+    /// one box per tag source. Each box is kept aligned with the matching
+    /// grid column (pixel-geometry mirroring) so it is obvious which artwork
+    /// came from which source.
+    /// </summary>
+    private Control BuildArtworkStrip()
+    {
+        _artworkStrip = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = SystemColors.Control,
+        };
+
+        // Boxes are positioned manually (mirroring the grid columns), so
+        // they must not be docked - Dock would fight SetBounds.
+        var currentGroup = new GroupBox
+        {
+            Text = "Current",
+            Dock = DockStyle.None,
+            Bounds = new Rectangle(3, 3, 120, 120),
+        };
+        _currentArtworkStripPic = new PictureBox
+        {
+            Dock = DockStyle.Fill,
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Padding = new Padding(4),
+        };
+        currentGroup.Controls.Add(_currentArtworkStripPic);
+        _artworkStrip.Controls.Add(currentGroup);
+
+        foreach (var source in TagSourceCatalog.All)
+        {
+            var group = new GroupBox
+            {
+                Text = StripLabel(source),
+                Dock = DockStyle.None,
+                Bounds = new Rectangle(3, 3, 120, 120),
+            };
+            var pic = new PictureBox
+            {
+                Dock = DockStyle.Fill,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Padding = new Padding(6),
+            };
+            group.Controls.Add(pic);
+            _sourceArtworkPics[source.Id] = pic;
+            _artworkStrip.Controls.Add(group);
+        }
+
+        _detailGrid.ColumnWidthChanged += (_, _) => AlignArtworkStrip();
+        _detailGrid.ColumnDisplayIndexChanged += (_, _) => AlignArtworkStrip();
+        _detailGrid.Scroll += (_, _) => AlignArtworkStrip();
+        _detailGrid.Resize += (_, _) => AlignArtworkStrip();
+        _splitter.SplitterMoved += (_, _) => AlignArtworkStrip();
+
+        return _artworkStrip;
+    }
+
+    /// <summary>
+    /// Mirrors each grid column's display rectangle onto its artwork box,
+    /// taking the grid's horizontal scroll into account so boxes stay under
+    /// the columns they belong to.
+    /// </summary>
+    private void AlignArtworkStrip()
+    {
+        if (_artworkStrip.Controls.Count == 0)
+        {
+            return;
+        }
+
+        var grid = _detailGrid;
+        var currentColumn = grid.Columns["Current"];
+        if (currentColumn is not null)
+        {
+            AlignOne(_currentArtworkStripPic.Parent!, currentColumn);
+        }
+        foreach (var (sourceId, column) in _sourceColumns)
+        {
+            if (_sourceArtworkPics.TryGetValue(sourceId, out var pic))
+            {
+                AlignOne(pic.Parent!, column);
+            }
+        }
+
+        void AlignOne(Control box, DataGridViewColumn column)
+        {
+            var rect = grid.GetColumnDisplayRectangle(column.Index, false);
+            var left = Math.Min(Math.Max(rect.Left + 2, 0), Math.Max(grid.ClientSize.Width - 20, 20));
+            var right = Math.Min(rect.Right - 2, grid.ClientSize.Width);
+            var width = Math.Max(right - left, 20);
+            box.SetBounds(left, 3, width, _artworkStrip.Height - 34);
+        }
     }
 
     protected override void OnShown(EventArgs e)
@@ -1347,13 +1495,15 @@ public sealed class MainForm : Form
         {
             // keep the default split; user can drag
         }
+
+        FillDetail(null); // also aligns the artwork strip boxes under the grid columns
     }
 
     private Control BuildCompareGrid()
     {
         var group = new GroupBox
         {
-            Text = "Tag comparison (current vs candidate)",
+            Text = "Tag comparison (Current column, then one column per source)",
             Dock = DockStyle.Fill,
         };
         _detailGrid = new DataGridView
@@ -1378,7 +1528,7 @@ public sealed class MainForm : Form
             Name = "Field",
             HeaderText = "Field",
             ReadOnly = true,
-            Width = 120,
+            Width = 110,
         });
         _detailGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -1386,16 +1536,27 @@ public sealed class MainForm : Form
             HeaderText = "Current",
             ReadOnly = true,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FillWeight = 50,
+            FillWeight = 42,
         });
-        _detailGrid.Columns.Add(new DataGridViewTextBoxColumn
+
+        // one column per known source, in the catalog (fallback) order;
+        // sources without results show empty cells on purpose
+        _sourceColumns.Clear();
+        foreach (var source in TagSourceCatalog.All)
         {
-            Name = "Proposed",
-            HeaderText = "Proposed",
-            ReadOnly = true,
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FillWeight = 50,
-        });
+            var column = new DataGridViewTextBoxColumn
+            {
+                Name = $"Source_{source.Id}",
+                HeaderText = source.Id == TagSources.ITunes ? "Apple" : source.DisplayName,
+                ReadOnly = true,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 29,
+            };
+            column.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleLeft;
+            _detailGrid.Columns.Add(column);
+            _sourceColumns[source.Id] = column;
+        }
+
         _detailGrid.CellValueChanged += DetailGrid_CellValueChanged;
         _detailGrid.CurrentCellDirtyStateChanged += static (s, e) =>
         {

@@ -22,7 +22,11 @@ public static class TagSourceCatalog
 }
 
 /// <summary>Static description of one source (id, label, credentials).</summary>
-public sealed record TagSourceInfo(string Id, string DisplayName, bool RequiresToken);
+public sealed record TagSourceInfo(string Id, string DisplayName, bool RequiresToken)
+{
+    // CheckedListBox shows this instead of the default record dump.
+    public override string ToString() => DisplayName + (RequiresToken ? " (token)" : string.Empty);
+}
 
 /// <summary>User options for one source (JSON-persisted in AppSettings).</summary>
 public sealed class TagSourceSettings
