@@ -13,3 +13,6 @@
 # Windows shell files
 desktop.ini
 Thumbs.db
+
+# UI verification screenshots (agent-generated, never committed)
+/ui-check.png
