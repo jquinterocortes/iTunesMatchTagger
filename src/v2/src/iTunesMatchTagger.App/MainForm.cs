@@ -78,7 +78,11 @@ public sealed class MainForm : Form
 
         Text = $"iTunes Match Tagger v2 - v{typeof(MainForm).Assembly.GetName().Version?.ToString(3)}";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(1380, 900);
+        // 1010 leaves the comparison grid enough rows under the artwork strip
+        // on a 1080p screen; clamp to the working area so the bottom bar and
+        // log stay reachable
+        var workArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1380, 940);
+        ClientSize = new Size(1380, Math.Min(1010, workArea.Height - 60));
         MinimumSize = new Size(1160, 720);
 
         BuildLayout();
@@ -950,8 +954,7 @@ public sealed class MainForm : Form
 
             // per-source cells: each shows the source's picked candidate
             // value, empty when that source produced nothing (still visible)
-            // values array is fully initialized before use
-            var values = new object[2 + _sourceColumns.Count];
+            var values = new object[3 + _sourceColumns.Count];
             values[0] = row.IsFieldEnabled(field.LookupMember);
             values[1] = field.DisplayName;
             values[2] = current ?? string.Empty;
