@@ -162,4 +162,34 @@ public class ITunesSearchClientTests
     {
         Assert.Null(new ITunesLookupResult().Year);
     }
+
+    [Theory]
+    [InlineData("https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/ab/cd/ef/source/100x100bb.jpg", "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/ab/cd/ef/source/600x600bb.jpg")]
+    [InlineData("https://is1-ssl.mzstatic.com/image/thumb/Music/xyz/source/100x100bb.png", "https://is1-ssl.mzstatic.com/image/thumb/Music/xyz/source/600x600bb.jpg")]
+    [InlineData("https://example.com/some/art.jpg", "https://example.com/some/art.jpg")]
+    public void HighResArtworkUrl_RewritesTheSizeSegment(string artworkUrl, string expected)
+    {
+        Assert.Equal(expected, ITunesSearchClient.HighResArtworkUrl(artworkUrl));
+    }
+
+    [Fact]
+    public async Task DownloadArtworkAsync_RequestsHighResUrl()
+    {
+        byte[]? downloaded = null;
+        var handler = new FakeHandler(request =>
+        {
+            downloaded = [0xFF, 0xD8, 0xFF]; // JPEG magic bytes
+            Assert.NotNull(request.RequestUri);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(downloaded),
+            };
+        });
+        using var client = new ITunesSearchClient(new HttpClient(handler));
+
+        var bytes = await client.DownloadArtworkAsync("https://is1-ssl.mzstatic.com/image/thumb/Music/a/source/100x100bb.jpg");
+
+        Assert.Equal([0xFF, 0xD8, 0xFF], bytes);
+        Assert.Equal("https://is1-ssl.mzstatic.com/image/thumb/Music/a/source/600x600bb.jpg", handler.LastRequest?.RequestUri?.ToString());
+    }
 }

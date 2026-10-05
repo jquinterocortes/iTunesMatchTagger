@@ -26,6 +26,7 @@ public sealed class TrackRow : INotifyPropertyChanged
             ["trackCount"] = nameof(TrackCount),
             ["discNumber"] = nameof(DiscNumber),
             ["discCount"] = nameof(DiscCount),
+            ["artworkUrl100"] = nameof(Artwork),
             ["Filename"] = nameof(File),
         };
 
@@ -39,6 +40,7 @@ public sealed class TrackRow : INotifyPropertyChanged
     private string? _trackCount;
     private string? _discNumber;
     private string? _discCount;
+    private string? _artwork;
 
     public TrackRow(ITaggableTrack track)
     {
@@ -77,6 +79,8 @@ public sealed class TrackRow : INotifyPropertyChanged
 
     public string? DiscCount { get => _discCount; private set { _discCount = value; RaisePropertyChanged(nameof(DiscCount)); } }
 
+    public string? Artwork { get => _artwork; private set { _artwork = value; RaisePropertyChanged(nameof(Artwork)); } }
+
     public string? GetValue(string lookupMember) => lookupMember switch
     {
         "trackName" => TrackName,
@@ -89,6 +93,7 @@ public sealed class TrackRow : INotifyPropertyChanged
         "trackCount" => TrackCount,
         "discNumber" => DiscNumber,
         "discCount" => DiscCount,
+        "artworkUrl100" => Artwork,
         "Filename" => File,
         _ => null,
     };
@@ -107,6 +112,7 @@ public sealed class TrackRow : INotifyPropertyChanged
             case "trackCount": TrackCount = value; break;
             case "discNumber": DiscNumber = value; break;
             case "discCount": DiscCount = value; break;
+            case "artworkUrl100": Artwork = value; break;
         }
     }
 

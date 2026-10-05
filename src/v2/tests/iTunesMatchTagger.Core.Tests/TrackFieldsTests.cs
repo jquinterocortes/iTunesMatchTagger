@@ -95,6 +95,16 @@ public class TrackFieldsTests
     }
 
     [Fact]
+    public void Artwork_FieldMapsTheLookupUrl()
+    {
+        var lookup = new ITunesLookupResult { ArtworkUrl100 = "https://is1-ssl.mzstatic.com/source/100x100bb.jpg" };
+
+        Assert.Equal(lookup.ArtworkUrl100, TrackFields.Artwork.GetFromLookup(lookup));
+        Assert.Equal("artworkUrl100", TrackFields.Artwork.LookupMember);
+        Assert.Null(TrackFields.Artwork.SetOnItunes);
+    }
+
+    [Fact]
     public void GetFromFileTag_ReadsTagLibTag()
     {
         var tag = new StubTag

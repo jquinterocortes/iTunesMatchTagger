@@ -54,6 +54,11 @@ Instructions for AI coding agents working in this repository.
 - `TrackField` (in Core) maps one field across all three back ends (Search
   API JSON, iTunes COM, TagLib# Tag). Add new taggable fields there - never
   with string-based reflection.
+- Album artwork is a `TrackField` whose value is the Search API's
+  `artworkUrl100` URL; the update loop downloads it (rewritten to
+  600x600bb) and writes it via `ITaggableTrack.WriteArtwork` —
+  `AddArtworkFromFile` on COM (replacing existing artworks) or
+  `Tag.Pictures` on TagLib#.
 - UI-thread discipline: COM access and `TrackRow` mutations happen only on
   the UI thread; background lookups report through `IProgress<T>`. Do not
   raise `TrackRow.PropertyChanged` from worker threads (DataGridView is

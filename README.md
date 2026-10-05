@@ -58,7 +58,8 @@ resolved from the registry.
 - [x] WinForms app on .NET 10: same 3-step workflow, async/parallel lookups
 - [x] iTunes COM integration without build-time COM references (`dynamic` + ProgID)
 - [x] Standalone mode: scan a folder of m4a/mp3 files and write tags directly (TagLib#)
-- [x] Unit tests for all core logic (24 passing)
+- [x] Album artwork: downloaded from the Search API (600x600) and embedded via iTunes COM or TagLib#
+- [x] Unit tests for all core logic (29 passing)
 - [ ] CI workflow (build + test on windows-latest)
 - [ ] Release packaging (self-contained single-file exe)
 

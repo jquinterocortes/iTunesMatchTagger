@@ -101,6 +101,18 @@ public static class TrackFields
             CoerceWrite: CoerceInt);
 
     /// <summary>
+    /// Album artwork, exposed by the Search API as artworkUrl100. The value
+    /// is a URL; "3. Update tracks" downloads it (upgraded to 600x600) and
+    /// writes it through <see cref="Tracks.ITaggableTrack.WriteArtwork"/>,
+    /// so this field is special-cased in the app's update loop.
+    /// </summary>
+    public static readonly TrackField Artwork =
+        new("Album Artwork", "artworkUrl100",
+            r => r.ArtworkUrl100,
+            _ => null,
+            SetOnItunes: null);
+
+    /// <summary>
     /// Read-only file location, shown as a grid column only (mirrors the
     /// upstream "Filename" option with <c>ShowOption = false</c>).
     /// </summary>
@@ -115,7 +127,7 @@ public static class TrackFields
     public static readonly IReadOnlyList<TrackField> All =
     [
         TrackName, ArtistName, AlbumArtist, AlbumName, Year, Genre,
-        TrackNumber, TrackCount, DiscNumber, DiscCount, Filename,
+        TrackNumber, TrackCount, DiscNumber, DiscCount, Artwork, Filename,
     ];
 
     /// <summary>Fields offered in the "fields to update" grid.</summary>

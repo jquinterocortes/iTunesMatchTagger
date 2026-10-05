@@ -71,4 +71,33 @@ public sealed class FileTrack : ITaggableTrack
 
         file.Save();
     }
+
+    public void WriteArtwork(byte[] imageBytes)
+    {
+        var (mimeType, extension) = DetectImageType(imageBytes);
+        var tempPath = Path.Combine(Path.GetTempPath(), $"imt-artwork-{Guid.NewGuid():N}{extension}");
+        File.WriteAllBytes(tempPath, imageBytes);
+        try
+        {
+            using var file = TagLib.File.Create(Location);
+            var picture = new TagLib.Picture(tempPath)
+            {
+                Type = TagLib.PictureType.FrontCover,
+                MimeType = mimeType,
+                Description = "Cover",
+            };
+            file.Tag.Pictures = new TagLib.IPicture[] { picture }; // replaces all existing artwork
+            file.Save();
+        }
+        finally
+        {
+            try { File.Delete(tempPath); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    private static (string MimeType, string Extension) DetectImageType(byte[] data) =>
+        data.Length >= 3 && data[0] == 0xFF && data[1] == 0xD8 ? ("image/jpeg", ".jpg")
+        : data.Length >= 4 && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 ? ("image/png", ".png")
+        : ("image/jpeg", ".jpg");
 }

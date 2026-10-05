@@ -66,4 +66,28 @@ public sealed class ComTrack : ITaggableTrack
 
         field.SetOnItunes(Raw, writeValue);
     }
+
+    public void WriteArtwork(byte[] imageBytes)
+    {
+        // iTunes embeds the image into the file for file-backed tracks.
+        // Replace (not append): matched files usually already carry artwork.
+        var tempPath = Path.Combine(Path.GetTempPath(), $"imt-artwork-{Guid.NewGuid():N}.jpg");
+        File.WriteAllBytes(tempPath, imageBytes);
+        try
+        {
+            dynamic artworks = Raw.Artwork;
+            int existing = (int)artworks.Count;
+            for (int i = existing; i >= 1; i--) // 1-based collection
+            {
+                artworks[i].Delete();
+            }
+
+            Raw.AddArtworkFromFile(tempPath);
+        }
+        finally
+        {
+            try { File.Delete(tempPath); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+    }
 }

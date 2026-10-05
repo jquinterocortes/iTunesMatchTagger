@@ -352,7 +352,7 @@ public sealed class MainForm : Form
     // 3. Update tracks
     // ------------------------------------------------------------------
 
-    private void BtnUpdate_Click(object? sender, EventArgs e)
+    private async void BtnUpdate_Click(object? sender, EventArgs e)
     {
         if (!EnsureNotBusy())
         {
@@ -384,6 +384,7 @@ public sealed class MainForm : Form
             foreach (var row in _rows)
             {
                 var writes = new List<KeyValuePair<TrackField, object?>>();
+                string? artworkUrl = null;
                 foreach (var option in active)
                 {
                     var value = option.Overwrite && !string.IsNullOrEmpty(option.OverwriteValue)
@@ -397,6 +398,14 @@ public sealed class MainForm : Form
                         continue;
                     }
 
+                    if (option.Field == TrackFields.Artwork)
+                    {
+                        // handled separately: the value is a URL that must be
+                        // downloaded before it can be embedded
+                        artworkUrl = value;
+                        continue;
+                    }
+
                     writes.Add(new KeyValuePair<TrackField, object?>(option.Field, value));
                     LogDebug($"{option.Field.DisplayName} = '{value}' -> {row.File}");
                 }
@@ -404,6 +413,20 @@ public sealed class MainForm : Form
                 try
                 {
                     row.Track.WriteFields(writes);
+
+                    if (artworkUrl is not null && row.LookupSuccess)
+                    {
+                        if (artworkUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var bytes = await _search.DownloadArtworkAsync(artworkUrl).ConfigureAwait(true);
+                            row.Track.WriteArtwork(bytes);
+                            LogDebug($"Artwork written ({bytes.Length} bytes) -> {row.File}");
+                        }
+                        else
+                        {
+                            LogDebug($"No artwork URL available for {row.File} (run a lookup first)");
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {

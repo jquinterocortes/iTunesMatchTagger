@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace iTunesMatchTagger.Core.Lookup;
 
@@ -47,6 +48,34 @@ public sealed class ITunesSearchClient : IDisposable
     public async Task<List<ITunesLookupResult>> SearchAsync(string term, string country, CancellationToken cancellationToken = default)
     {
         return await QueryAsync($"{SearchUrl}?term={Uri.EscapeDataString(term)}&country={country}&limit=5", cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Downloads album artwork bytes. Apple artwork URLs end with a size
+    /// segment like 100x100bb.jpg; it is rewritten to request 600x600.
+    /// </summary>
+    public async Task<byte[]> DownloadArtworkAsync(string artworkUrl, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(artworkUrl);
+        return await _httpClient.GetByteArrayAsync(HighResArtworkUrl(artworkUrl), cancellationToken).ConfigureAwait(false);
+    }
+
+    private static readonly Regex SizeSegmentRegex = new(@"^\d+x\d+bb\.(jpg|jpeg|png|webp)$", RegexOptions.Compiled);
+
+    /// <summary>Rewrites the artwork URL's size segment to 600x600. Parsing core, exposed for tests.</summary>
+    public static string HighResArtworkUrl(string artworkUrl)
+    {
+        var lastSlash = artworkUrl.LastIndexOf('/');
+        if (lastSlash >= 0)
+        {
+            var lastSegment = artworkUrl[(lastSlash + 1)..];
+            if (SizeSegmentRegex.IsMatch(lastSegment))
+            {
+                return artworkUrl[..(lastSlash + 1)] + "600x600bb.jpg";
+            }
+        }
+
+        return artworkUrl;
     }
 
     private async Task<List<ITunesLookupResult>> QueryAsync(string url, CancellationToken cancellationToken)

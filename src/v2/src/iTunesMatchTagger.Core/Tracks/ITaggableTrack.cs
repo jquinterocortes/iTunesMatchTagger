@@ -32,4 +32,7 @@ public interface ITaggableTrack
             WriteField(write.Key, write.Value);
         }
     }
+
+    /// <summary>Replaces the embedded album artwork with the given image bytes.</summary>
+    void WriteArtwork(byte[] imageBytes);
 }
