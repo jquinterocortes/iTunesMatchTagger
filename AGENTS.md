@@ -43,6 +43,13 @@ Instructions for AI coding agents working in this repository.
 - `src/iTunesMatchTagger.App` (net10.0-windows, WinForms): `MainForm.cs`
   builds the UI **in code** - there are no Designer files; `TrackRow` /
   `OptionRow` are the grid row models.
+- Alternative tag sources live in `src/iTunesMatchTagger.Core/Sources/`
+  (`ITagSource` + normalized `TagCandidate`; MusicBrainz, Discogs, Deezer
+  and an `ITunesSource` wrapper add term-search candidates; `TagSourceFactory`
+  builds the chain from `AppSettings.Sources`, Apple always first). Add new
+  sources by mapping their API into `TagCandidate` - never leak provider
+  DTOs into `TrackField`. Discogs needs a user token, which is stored in
+  settings and reported via `TagSourceAuthException` when missing.
 - `tests/iTunesMatchTagger.Core.Tests` (xUnit): TrackIdReader with
   synthetic bytes, Search client with a fake `HttpMessageHandler`, field
   map coverage. Keep Core logic pure so it stays testable without iTunes
@@ -51,20 +58,22 @@ Instructions for AI coding agents working in this repository.
   binding via `Type.GetTypeFromProgID("iTunes.Application")` — iTunes is
   needed at *runtime* only, never to build.
 - iTunes COM collections are 1-based (`collection[i]` for `i` in `1..Count`).
-- `TrackField` (in Core) maps one field across all three back ends (Search
-  API JSON, iTunes COM, TagLib# Tag). Add new taggable fields there - never
-  with string-based reflection.
-- Album artwork is a `TrackField` whose value is the Search API's
-  `artworkUrl100` URL; the update loop downloads it (rewritten via
-  `SizedArtworkUrl` to 600x600bb) and writes it via
-  `ITaggableTrack.WriteArtwork` — `AddArtworkFromFile` on COM (replacing
-  existing artworks) or `Tag.Pictures` on TagLib#. Lookup also downloads
-  a 300px preview for the UI.
+- `TrackField` (in Core) maps one field across every operand: Search API
+  JSON, tag-source `TagCandidate`, iTunes COM, TagLib# Tag. Add new
+  taggable fields there - never with string-based reflection.
+- Album artwork is a `TrackField` whose value is an artwork URL
+  (Apple `artworkUrl100`, or a direct URL from another source); the
+  update loop downloads it via `MainForm.DownloadArtworkAsync` (Apple
+  URLs rewritten by `SizedArtworkUrl` to 600x600bb, others as-is) and
+  writes it via `ITaggableTrack.WriteArtwork` — `AddArtworkFromFile` on
+  COM (replacing existing artworks) or `Tag.Pictures` on TagLib#. Lookup
+  also downloads a 300px preview for the UI.
 - UI is a master-detail validator: owner-drawn track list (thumbnail,
-  status, orange dot when a write would change values) + detail panel with
-  current-vs-Apple artwork (current read from the file via
-  `ArtworkReader`, no COM picture marshaling) and a field comparison
-  table with differences highlighted.
+  status, orange dot when a write would change values) + detail panel
+  with a candidate picker (per-source results), current-vs-candidate
+  artwork (current read from the file via `ArtworkReader`, no COM
+  picture marshaling), a comparison table with a per-row "Use" checkbox
+  (per-track field mask) and differences highlighted.
 - UI-thread discipline: COM access and `TrackRow` mutations happen only on
   the UI thread; background lookups report through `IProgress<T>`. Do not
   raise `TrackRow.PropertyChanged` from worker threads (DataGridView is

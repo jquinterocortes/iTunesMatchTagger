@@ -50,7 +50,8 @@ public sealed class ITunesSource : ITagSource
         return await _search.DownloadArtworkAsync(artworkUrl, size, cancellationToken).ConfigureAwait(false);
     }
 
-    private static TagCandidate ToCandidate(ITunesLookupResult r) => new()
+    /// <summary>Wraps a direct Apple lookup result (the ID lookup path) as a candidate.</summary>
+    public static TagCandidate FromLookupResult(ITunesLookupResult r) => new()
     {
         SourceId = TagSources.ITunes,
         Title = r.TrackName ?? string.Empty,
@@ -66,6 +67,8 @@ public sealed class ITunesSource : ITagSource
         ArtworkUrl = r.ArtworkUrl100,
         Details = $"Apple catalog ID {r.TrackId}",
     };
+
+    private static TagCandidate ToCandidate(ITunesLookupResult r) => FromLookupResult(r);
 
     public void Dispose()
     {

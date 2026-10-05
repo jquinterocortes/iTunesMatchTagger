@@ -60,6 +60,10 @@ resolved from the registry.
 - [x] Standalone mode: scan a folder of m4a/mp3 files and write tags directly (TagLib#)
 - [x] Album artwork: downloaded from the Search API (600x600) and embedded via iTunes COM or TagLib#
 - [x] Unit tests for all core logic (29 passing)
+- [x] Additional tag sources: MusicBrainz, Discogs and Deezer adapters with a
+      normalized `TagCandidate`; automatic fallback (Apple first), candidate
+      picker and per-field "Use" checkboxes in the detail panel
+- [ ] Candidate quality: MusicBrainz track/disc numbers (needs release lookup), genre via `/recording/{mbid}`
 - [ ] CI workflow (build + test on windows-latest)
 - [ ] Release packaging (self-contained single-file exe)
 

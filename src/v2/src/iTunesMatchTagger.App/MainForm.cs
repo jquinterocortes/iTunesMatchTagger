@@ -5,6 +5,7 @@ using iTunesMatchTagger.Core.Fields;
 using iTunesMatchTagger.Core.ITunes;
 using iTunesMatchTagger.Core.Lookup;
 using iTunesMatchTagger.Core.Settings;
+using iTunesMatchTagger.Core.Sources;
 using iTunesMatchTagger.Core.Tracks;
 
 namespace iTunesMatchTagger.App;
@@ -30,10 +31,17 @@ public sealed class MainForm : Form
 
     private sealed record LogEntry(string Message, LogSeverity Severity);
 
-    private sealed record LookupOutcome(TrackRow Row, ITunesLookupResult? Result, string FoundIn, bool FoundViaSearch, byte[]? ArtworkBytes);
+    private sealed record LookupOutcome(
+        TrackRow Row,
+        IReadOnlyList<TagCandidate>? Candidates,
+        string FoundIn,
+        bool FoundViaSearch,
+        long? AppleTrackId,
+        byte[]? ArtworkBytes);
 
     private readonly ITunesComClient _itunes = new();
     private readonly ITunesSearchClient _search = new();
+    private readonly HttpClient _artworkHttp = new();
     private readonly List<TrackRow> _rows = [];
     private readonly BindingList<OptionRow> _options = [];
     private readonly IProgress<LogEntry> _logSink;
@@ -42,6 +50,9 @@ public sealed class MainForm : Form
     private bool _busy;
 
     private CheckedListBox _countries = new();
+    private CheckedListBox _sourcesList = new();
+    private TextBox _discogsToken = new();
+    private ComboBox _candidatePicker = new();
     private DataGridView _optionsGrid = new();
     private ListBox _trackList = new();
     private SplitContainer _splitter = new();
@@ -252,11 +263,20 @@ public sealed class MainForm : Form
         }
 
         var countries = CheckedCountries();
+        var fallbackSources = BuildSourceChain(out var sourceErrors);
+        if (countries.Count == 0 && fallbackSources.Count == 0)
+        {
+            var message = sourceErrors.Count > 0
+                ? $"No store countries selected and no tag sources ready:\n{string.Join("\n", sourceErrors)}"
+                : "No store countries selected and no tag sources enabled.";
+            Log(message, LogSeverity.Error);
+            MessageBox.Show(this, message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         if (countries.Count == 0)
         {
-            Log("No store countries selected.", LogSeverity.Error);
-            MessageBox.Show(this, "No store countries selected.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
+            Log("No store countries selected - Apple lookup will be skipped.", LogSeverity.Warning);
         }
 
         if (_rows.Count == 0)
@@ -277,7 +297,8 @@ public sealed class MainForm : Form
         _cancellation = new CancellationTokenSource();
         _progress.Value = 0;
         _progress.Maximum = _rows.Count;
-        Log($"Lookup started: {_rows.Count} track(s) across {countries.Count} countr(ies).");
+        Log($"Lookup started: {_rows.Count} track(s), {countries.Count} countr(ies), {fallbackSources.Count} fallback source(s).");
+        var skippedSources = new HashSet<string>(StringComparer.Ordinal);
 
         try
         {
@@ -286,7 +307,7 @@ public sealed class MainForm : Form
                 new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = _cancellation.Token },
                 async (row, cancellationToken) =>
                 {
-                    var outcome = await LookupRowAsync(row, countries, cancellationToken).ConfigureAwait(false);
+                    var outcome = await LookupRowAsync(row, countries, fallbackSources, skippedSources, cancellationToken).ConfigureAwait(false);
                     _lookupSink.Report(outcome);
                 }).ConfigureAwait(true);
 
@@ -295,10 +316,6 @@ public sealed class MainForm : Form
         catch (OperationCanceledException)
         {
             Log("Lookup cancelled.", LogSeverity.Warning);
-        }
-        catch (HttpRequestException ex)
-        {
-            Log($"Lookup failed: {ex.Message}", LogSeverity.Error);
         }
         catch (Exception ex)
         {
@@ -312,13 +329,63 @@ public sealed class MainForm : Form
         }
     }
 
-    private async Task<LookupOutcome> LookupRowAsync(TrackRow row, IReadOnlyList<string> countries, CancellationToken cancellationToken)
+    /// <summary>
+    /// Builds the live fallback chain from the sources panel (Apple is
+    /// implicit and always first). Reports configuration problems for
+    /// enabled-but-unready sources (missing Discogs token).
+    /// </summary>
+    private List<ITagSource> BuildSourceChain(out List<string> errors)
     {
-        ITunesLookupResult? result = null;
+        errors = [];
+        var chain = new List<ITagSource>();
+        foreach (var id in CheckedSourceIds())
+        {
+            var source = TagSourceFactory.Create(TagSourceCatalog.ById(id)!, _discogsToken.Text.Trim());
+            if (source is null)
+            {
+                continue;
+            }
+
+            if (source.RequiresCredentials && string.IsNullOrWhiteSpace(_discogsToken.Text))
+            {
+                errors.Add($"{source.Description}: needs an access token.");
+                source.Dispose();
+                continue;
+            }
+
+            chain.Add(source);
+        }
+
+        return chain;
+    }
+
+    private List<string> CheckedSourceIds()
+    {
+        var ids = new List<string>();
+        foreach (var item in _sourcesList.CheckedItems)
+        {
+            if (item is TagSourceInfo info)
+            {
+                ids.Add(info.Id);
+            }
+        }
+
+        return ids;
+    }
+
+    private async Task<LookupOutcome> LookupRowAsync(
+        TrackRow row,
+        IReadOnlyList<string> countries,
+        IReadOnlyList<ITagSource> fallbackSources,
+        ISet<string> skippedSources,
+        CancellationToken cancellationToken)
+    {
+        // Stage 1 - Apple first: the embedded catalog ID across storefronts.
+        ITunesLookupResult? appleResult = null;
         var foundIn = string.Empty;
         var viaSearch = false;
 
-        if (row.Track.TrackId > 0)
+        if (row.Track.TrackId > 0 && countries.Count > 0)
         {
             foreach (var country in countries)
             {
@@ -326,13 +393,13 @@ public sealed class MainForm : Form
                 if (found is not null)
                 {
                     LogDebug($"Track ID {row.Track.TrackId} found in {country}: {row.File}");
-                    result = found;
+                    appleResult = found;
                     foundIn = country;
                     break;
                 }
             }
 
-            if (result is null)
+            if (appleResult is null)
             {
                 // The embedded ID is dead in every selected storefront (Apple
                 // delists albums; the file keeps the old ID). Fall back to
@@ -341,12 +408,9 @@ public sealed class MainForm : Form
                 Log($"Track ID {row.Track.TrackId} not found in any selected country, trying search by current tags: {row.File}", LogSeverity.Information);
             }
         }
-        else
-        {
-            Log($"No embedded Track ID, searching by current tags: {row.File}", LogSeverity.Information);
-        }
 
-        if (result is null)
+        // Stage 2 - Apple term search across storefronts.
+        if (appleResult is null && countries.Count > 0)
         {
             var term = $"{row.GetCurrent("artistName")} {row.GetCurrent("trackName")}".Trim();
             if (term.Length == 0)
@@ -362,7 +426,7 @@ public sealed class MainForm : Form
                     if (first is not null)
                     {
                         LogDebug($"Term '{term}' found in {country}: {row.File} (catalog Track ID {first.TrackId})");
-                        result = first;
+                        appleResult = first;
                         foundIn = country;
                         viaSearch = true;
                         break;
@@ -371,12 +435,75 @@ public sealed class MainForm : Form
             }
         }
 
+        // Stage 3 - the other enabled tag sources, in fallback order.
+        // Every enabled source is queried (not just the first that finds
+        // something) so the user can compare candidates across sources.
+        var candidates = new List<TagCandidate>();
+        var autoSelectIndex = -1;
+
+        if (appleResult is not null)
+        {
+            candidates.Add(ITunesSource.FromLookupResult(appleResult));
+            autoSelectIndex = 0;
+        }
+        else if (fallbackSources.Count > 0)
+        {
+            var term = new TagQuery(
+                Artist: row.GetCurrent("artistName"),
+                Title: row.GetCurrent("trackName"),
+                Album: row.GetCurrent("collectionName"));
+            if (string.IsNullOrWhiteSpace(term.ToString()))
+            {
+                Log($"No tags to search on other sources: {row.File}", LogSeverity.Warning);
+            }
+            else
+            {
+                foreach (var source in fallbackSources)
+                {
+                    if (skippedSources.Contains(source.Id))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        var sourceCandidates = await source.SearchAsync(term, cancellationToken).ConfigureAwait(false);
+                        if (sourceCandidates.Count > 0)
+                        {
+                            Log($"{source.Id}: {sourceCandidates.Count} candidate(s): {row.File}");
+                            if (autoSelectIndex < 0)
+                            {
+                                autoSelectIndex = candidates.Count;
+                            }
+
+                            candidates.AddRange(sourceCandidates);
+                        }
+                        else
+                        {
+                            LogDebug($"{source.Id}: no results: {row.File}");
+                        }
+                    }
+                    catch (TagSourceAuthException ex)
+                    {
+                        // one message per run - it is a configuration problem
+                        skippedSources.Add(source.Id);
+                        Log($"{source.Id} disabled for this run: {ex.Message}", LogSeverity.Error);
+                    }
+                    catch (Exception ex) when (ex is HttpRequestException or TagSourceException or TaskCanceledException)
+                    {
+                        Log($"{source.Id} lookup failed: {ex.Message}", LogSeverity.Warning);
+                    }
+                }
+            }
+        }
+
         byte[]? artworkBytes = null;
-        if (result?.ArtworkUrl100 is not null)
+        var previewUrl = candidates.Count > 0 ? candidates[0].ArtworkUrl : null;
+        if (previewUrl is not null)
         {
             try
             {
-                artworkBytes = await _search.DownloadArtworkAsync(result.ArtworkUrl100, 300, cancellationToken).ConfigureAwait(false);
+                artworkBytes = await DownloadArtworkAsync(previewUrl, 300, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
             {
@@ -384,7 +511,23 @@ public sealed class MainForm : Form
             }
         }
 
-        return new LookupOutcome(row, result, foundIn, viaSearch, artworkBytes);
+        return new LookupOutcome(
+            row,
+            candidates,
+            foundIn,
+            viaSearch,
+            appleResult?.TrackId,
+            artworkBytes);
+    }
+
+    /// <summary>
+    /// Downloads artwork bytes; Apple URLs get their size segment rewritten
+    /// (100x100bb -> 300x300bb), other sources use the URL as-is.
+    /// </summary>
+    private async Task<byte[]> DownloadArtworkAsync(string artworkUrl, int size, CancellationToken cancellationToken)
+    {
+        var url = ITunesSearchClient.SizedArtworkUrl(artworkUrl, size);
+        return await _artworkHttp.GetByteArrayAsync(url, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Runs on the UI thread (posted through <see cref="Progress{T}"/>).</summary>
@@ -393,31 +536,29 @@ public sealed class MainForm : Form
         var row = outcome.Row;
         _progress.PerformStep();
 
-        if (outcome.Result is not null)
+        var candidates = outcome.Candidates ?? [];
+        if (candidates.Count > 0)
         {
-            var result = outcome.Result;
             row.LookupSuccess = true;
-
-            foreach (var option in _options.Where(static o => o.Update))
-            {
-                var value = option.Field.GetFromLookup(result);
-                row.SetProposed(option.Field.LookupMember, value?.ToString());
-            }
-
+            row.SetCandidates(candidates, 0);
             row.SetArtworkImage(ToImage(outcome.ArtworkBytes));
 
+            var selected = row.SelectedCandidate!;
             row.SetStatus(
-                outcome.FoundViaSearch
-                    ? $"Found via search in {outcome.FoundIn} (catalog ID {result.TrackId})"
-                    : $"Found in {outcome.FoundIn}",
+                selected.SourceId == TagSources.ITunes
+                    ? outcome.FoundViaSearch
+                        ? $"Found via search in {outcome.FoundIn} (catalog ID {outcome.AppleTrackId})"
+                        : $"Found in {outcome.FoundIn}"
+                    : $"Found on {selected.SourceId} - {candidates.Count} candidate(s), pick one in the detail panel",
                 StatusKind.Success);
         }
         else
         {
             row.LookupSuccess = false;
             row.ClearProposed();
+            row.SetCandidates([], -1);
             row.SetArtworkImage(null);
-            row.SetStatus("Not found in selected countries - the ID may be delisted from Apple's catalog", StatusKind.Error);
+            row.SetStatus("Not found on Apple or the enabled tag sources", StatusKind.Error);
             Log($"Not found: {row.File} (Track ID {row.Track.TrackId})", LogSeverity.Information);
         }
 
@@ -467,6 +608,11 @@ public sealed class MainForm : Form
                 string? artworkValue = null;
                 foreach (var option in active)
                 {
+                    if (!row.IsFieldEnabled(option.Field.LookupMember))
+                    {
+                        continue; // unchecked in this track's comparison grid
+                    }
+
                     var value = option.Overwrite && !string.IsNullOrEmpty(option.OverwriteValue)
                         ? option.OverwriteValue
                         : row.LookupSuccess
@@ -514,7 +660,7 @@ public sealed class MainForm : Form
                         }
                         else if (artworkValue.StartsWith("http", StringComparison.OrdinalIgnoreCase) && row.LookupSuccess)
                         {
-                            var bytes = await _search.DownloadArtworkAsync(artworkValue).ConfigureAwait(true);
+                            var bytes = await DownloadArtworkAsync(artworkValue, 600, CancellationToken.None).ConfigureAwait(true);
                             row.Track.WriteArtwork(bytes);
                             LogDebug($"Artwork written ({bytes.Length} bytes) -> {row.File}");
                             artworkWritten = true;
@@ -651,7 +797,8 @@ public sealed class MainForm : Form
 
     private void FillDetail(TrackRow? row)
     {
-        _detailGrid.Rows.Clear();
+        RefreshCandidatePicker(row);
+        RefreshCompareGrid(row);
 
         if (row is null)
         {
@@ -660,26 +807,6 @@ public sealed class MainForm : Form
             _statusLabel.Text = "Select a track to review its tags.";
             _statusLabel.ForeColor = SystemColors.ControlText;
             return;
-        }
-
-        foreach (var field in TrackFields.All)
-        {
-            if (field.LookupMember == "Filename" || field == TrackFields.Artwork)
-            {
-                continue; // the list shows the file; artwork is shown as pictures
-            }
-
-            var current = row.GetCurrent(field.LookupMember);
-            var proposed = row.GetProposed(field.LookupMember);
-            var index = _detailGrid.Rows.Add(field.DisplayName, current ?? string.Empty, proposed ?? string.Empty);
-
-            if (proposed is not null)
-            {
-                var changed = !string.Equals(current, proposed, StringComparison.Ordinal);
-                _detailGrid.Rows[index].DefaultCellStyle.BackColor = changed
-                    ? Color.FromArgb(255, 246, 220) // will change - amber
-                    : Color.FromArgb(232, 245, 233); // identical - light green
-            }
         }
 
         _artworkCurrentPic.Image = row.CurrentArtworkImage;
@@ -695,6 +822,112 @@ public sealed class MainForm : Form
             StatusKind.Error => Color.FromArgb(192, 0, 0),
             _ => SystemColors.ControlText,
         };
+    }
+
+    private void RefreshCandidatePicker(TrackRow? row)
+    {
+        _candidatePicker.SelectedIndexChanged -= CandidatePicker_SelectedIndexChanged;
+        _candidatePicker.Items.Clear();
+        _candidatePicker.Enabled = row is { Candidates.Count: > 0 };
+
+        if (row is { Candidates.Count: > 0 })
+        {
+            for (var i = 0; i < row.Candidates.Count; i++)
+            {
+                var candidate = row.Candidates[i];
+                var summary = string.Join(" - ",
+                    new[] { candidate.Title, candidate.Artist, candidate.Album }
+                        .Where(static s => !string.IsNullOrEmpty(s)));
+                _candidatePicker.Items.Add($"[{candidate.SourceId}] {summary}");
+            }
+
+            _candidatePicker.SelectedIndex = Math.Max(0, row.SelectedCandidateIndex);
+        }
+
+        _candidatePicker.SelectedIndexChanged += CandidatePicker_SelectedIndexChanged;
+    }
+
+    private void CandidatePicker_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        var row = SelectedRow();
+        if (row is null || row.Candidates.Count == 0)
+        {
+            return;
+        }
+
+        var index = _candidatePicker.SelectedIndex;
+        if (index == row.SelectedCandidateIndex)
+        {
+            return;
+        }
+
+        row.SelectCandidate(index);
+        _trackList.Invalidate();
+        RefreshCompareGrid(row);
+
+        var candidate = row.SelectedCandidate;
+        if (candidate?.ArtworkUrl is not null)
+        {
+            _ = LoadCandidateArtworkAsync(row, candidate.ArtworkUrl);
+        }
+    }
+
+    /// <summary>Downloads the selected candidate's artwork preview and updates the UI when done.</summary>
+    private async Task LoadCandidateArtworkAsync(TrackRow row, string artworkUrl)
+    {
+        try
+        {
+            var bytes = await DownloadArtworkAsync(artworkUrl, 300, CancellationToken.None).ConfigureAwait(true);
+            BeginInvoke(new Action(() =>
+            {
+                if (ReferenceEquals(SelectedRow(), row) &&
+                    string.Equals(row.SelectedCandidate?.ArtworkUrl, artworkUrl, StringComparison.Ordinal))
+                {
+                    row.SetArtworkImage(ToImage(bytes));
+                    FillDetail(row);
+                    _trackList.Invalidate();
+                }
+            }));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException)
+        {
+            LogDebug($"Candidate artwork download failed: {ex.Message}");
+        }
+    }
+
+    private void RefreshCompareGrid(TrackRow? row)
+    {
+        _detailGrid.Rows.Clear();
+
+        if (row is null)
+        {
+            return;
+        }
+
+        foreach (var field in TrackFields.All)
+        {
+            if (field.LookupMember == "Filename" || field == TrackFields.Artwork)
+            {
+                continue; // the list shows the file; artwork is shown as pictures
+            }
+
+            var current = row.GetCurrent(field.LookupMember);
+            var proposed = row.GetProposed(field.LookupMember);
+            var index = _detailGrid.Rows.Add(row.IsFieldEnabled(field.LookupMember), field.DisplayName, current ?? string.Empty, proposed ?? string.Empty);
+
+            if (proposed is not null)
+            {
+                var changed = !string.Equals(current, proposed, StringComparison.Ordinal);
+                _detailGrid.Rows[index].DefaultCellStyle.BackColor = changed
+                    ? Color.FromArgb(255, 246, 220) // will change - amber
+                    : Color.FromArgb(232, 245, 233); // identical - light green
+            }
+
+            if (!row.IsFieldEnabled(field.LookupMember))
+            {
+                _detailGrid.Rows[index].DefaultCellStyle.ForeColor = SystemColors.GrayText;
+            }
+        }
     }
 
     private bool WillChangeSomething(TrackRow row)
@@ -847,11 +1080,12 @@ public sealed class MainForm : Form
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1,
         };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 18));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
 
         var countriesGroup = new GroupBox
         {
@@ -885,6 +1119,50 @@ public sealed class MainForm : Form
 
         countriesGroup.Controls.Add(_countries);
         countriesGroup.Controls.Add(countryButtons);
+
+        var sourcesGroup = new GroupBox
+        {
+            Text = "Tag sources (fallback order)",
+            Dock = DockStyle.Fill,
+        };
+        _sourcesList = new CheckedListBox
+        {
+            Dock = DockStyle.Fill,
+            CheckOnClick = true,
+            IntegralHeight = false,
+        };
+        foreach (var source in TagSourceCatalog.All.Where(static s => s.Id != TagSources.ITunes))
+        {
+            _sourcesList.Items.Add(source, false);
+        }
+
+        var sourcesBottom = new TableLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            ColumnCount = 2,
+            RowCount = 1,
+            Height = 30,
+            AutoSize = true,
+        };
+        sourcesBottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        sourcesBottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        sourcesBottom.Controls.Add(new Label { Text = "Discogs token:", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
+        _discogsToken = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
+        var tokenTip = new ToolTip();
+        tokenTip.SetToolTip(_discogsToken, "Personal access token from discogs.com/settings/developers");
+        sourcesBottom.Controls.Add(_discogsToken, 1, 0);
+
+        var sourcesHint = new Label
+        {
+            Text = "Apple (iTunes Search) is always tried first.",
+            Dock = DockStyle.Top,
+            Height = 20,
+            ForeColor = SystemColors.GrayText,
+        };
+
+        sourcesGroup.Controls.Add(_sourcesList);
+        sourcesGroup.Controls.Add(sourcesBottom);
+        sourcesGroup.Controls.Add(sourcesHint);
 
         var optionsGroup = new GroupBox
         {
@@ -934,7 +1212,8 @@ public sealed class MainForm : Form
         optionsGroup.Controls.Add(_optionsGrid);
 
         panel.Controls.Add(countriesGroup, 0, 0);
-        panel.Controls.Add(optionsGroup, 1, 0);
+        panel.Controls.Add(sourcesGroup, 1, 0);
+        panel.Controls.Add(optionsGroup, 2, 0);
         return panel;
     }
 
@@ -967,9 +1246,10 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 2,
+            RowCount = 3,
         };
         detail.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+        detail.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
         detail.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         detail.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 215));
         detail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -984,6 +1264,29 @@ public sealed class MainForm : Form
         };
         detail.Controls.Add(_statusLabel, 0, 0);
         detail.SetColumnSpan(_statusLabel, 2);
+
+        var candidateBar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+        };
+        candidateBar.Controls.Add(new Label
+        {
+            Text = "Result:",
+            AutoSize = true,
+            Margin = new Padding(4, 6, 6, 0),
+            ForeColor = SystemColors.GrayText,
+        });
+        _candidatePicker = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 520,
+        };
+        _candidatePicker.SelectedIndexChanged += CandidatePicker_SelectedIndexChanged;
+        candidateBar.Controls.Add(_candidatePicker);
+        detail.Controls.Add(candidateBar, 0, 1);
+        detail.SetColumnSpan(candidateBar, 2);
 
         // artwork previews stacked vertically; the comparison grid sits
         // horizontally next to them and uses the full remaining width
@@ -1010,7 +1313,7 @@ public sealed class MainForm : Form
 
         var newGroup = new GroupBox
         {
-            Text = "New (from Apple)",
+            Text = "New (from candidate)",
             Dock = DockStyle.Fill,
         };
         _artworkNewPic = new PictureBox
@@ -1023,8 +1326,8 @@ public sealed class MainForm : Form
         artworkColumn.Controls.Add(currentGroup, 0, 0);
         artworkColumn.Controls.Add(newGroup, 0, 1);
 
-        detail.Controls.Add(artworkColumn, 0, 1);
-        detail.Controls.Add(BuildCompareGrid(), 1, 1);
+        detail.Controls.Add(artworkColumn, 0, 2);
+        detail.Controls.Add(BuildCompareGrid(), 1, 2);
 
         _splitter.Panel2.Controls.Add(detail);
 
@@ -1050,7 +1353,7 @@ public sealed class MainForm : Form
     {
         var group = new GroupBox
         {
-            Text = "Tag comparison (current vs from Apple)",
+            Text = "Tag comparison (current vs candidate)",
             Dock = DockStyle.Fill,
         };
         _detailGrid = new DataGridView
@@ -1060,33 +1363,69 @@ public sealed class MainForm : Form
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
             AllowUserToResizeRows = false,
-            ReadOnly = true,
             RowHeadersVisible = false,
-            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            SelectionMode = DataGridViewSelectionMode.CellSelect,
             BackgroundColor = SystemColors.Window,
         };
+        _detailGrid.Columns.Add(new DataGridViewCheckBoxColumn
+        {
+            Name = "Use",
+            HeaderText = "Use",
+            Width = 46,
+        });
         _detailGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Field",
             HeaderText = "Field",
+            ReadOnly = true,
             Width = 120,
         });
         _detailGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Current",
             HeaderText = "Current",
+            ReadOnly = true,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 50,
         });
         _detailGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Proposed",
-            HeaderText = "From Apple",
+            HeaderText = "Proposed",
+            ReadOnly = true,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 50,
         });
+        _detailGrid.CellValueChanged += DetailGrid_CellValueChanged;
+        _detailGrid.CurrentCellDirtyStateChanged += static (s, e) =>
+        {
+            var grid = (DataGridView)s!;
+            if (grid.IsCurrentCellDirty)
+            {
+                grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            }
+        };
         group.Controls.Add(_detailGrid);
         return group;
+    }
+
+    private void DetailGrid_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
+    {
+        var row = SelectedRow();
+        if (row is null || e.RowIndex < 0 || _detailGrid.Columns[e.ColumnIndex].Name != "Use")
+        {
+            return;
+        }
+
+        var enabled = (bool)(_detailGrid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value ?? true);
+        var fieldName = _detailGrid.Rows[e.RowIndex].Cells["Field"].Value?.ToString();
+        var field = TrackFields.All.FirstOrDefault(f => f.DisplayName == fieldName);
+        if (field is not null)
+        {
+            row.SetFieldEnabled(field.LookupMember, enabled);
+            _trackList.Invalidate(); // the change dot may flip
+            RefreshCompareGrid(row);
+        }
     }
 
     private Control BuildLogPanel()
@@ -1172,6 +1511,17 @@ public sealed class MainForm : Form
                 option.OverwriteValue = saved.OverwriteValue;
             }
         }
+
+        for (var i = 0; i < _sourcesList.Items.Count; i++)
+        {
+            if (_sourcesList.Items[i] is TagSourceInfo info)
+            {
+                var saved = settings.Sources.FirstOrDefault(s => s.Id == info.Id);
+                _sourcesList.SetItemChecked(i, saved?.Enabled == true);
+            }
+        }
+
+        _discogsToken.Text = settings.Sources.FirstOrDefault(static s => s.Id == TagSources.Discogs)?.Token ?? string.Empty;
     }
 
     private void SaveSettings()
@@ -1179,7 +1529,17 @@ public sealed class MainForm : Form
         var settings = new AppSettings
         {
             SelectedCountries = [.. CheckedCountries()],
+            Sources =
+            [
+                new TagSourceSettings { Id = TagSources.ITunes, Enabled = true, Token = null },
+                .. CheckedSourceIds().Select(static id => new TagSourceSettings { Id = id, Enabled = true }),
+            ],
         };
+
+        if (_discogsToken.Text.Trim() is { Length: > 0 } token)
+        {
+            settings.Sources.Add(new TagSourceSettings { Id = TagSources.Discogs, Enabled = CheckedSourceIds().Contains(TagSources.Discogs), Token = token });
+        }
 
         foreach (var option in _options)
         {

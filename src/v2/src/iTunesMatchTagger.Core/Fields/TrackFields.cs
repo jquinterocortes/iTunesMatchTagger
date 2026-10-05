@@ -1,4 +1,5 @@
 using System.Globalization;
+using iTunesMatchTagger.Core.Sources;
 
 namespace iTunesMatchTagger.Core.Fields;
 
@@ -11,45 +12,50 @@ public static class TrackFields
 {
     public static readonly TrackField TrackName =
         new("Track Name", "trackName",
-            r => r.TrackName,
-            t => (string?)t.Name,
-            (t, v) => t.Name = v,
+            GetFromLookup: r => r.TrackName,
+            GetFromCandidate: c => c.Title,
+            GetFromItunes: t => (string?)t.Name,
+            SetOnItunes: (t, v) => t.Name = v,
             GetFromFileTag: t => t.Title,
             SetOnFileTag: (t, v) => t.Title = AsString(v),
             UpdateByDefault: true);
 
     public static readonly TrackField ArtistName =
         new("Track Artist", "artistName",
-            r => r.ArtistName,
-            t => (string?)t.Artist,
-            (t, v) => t.Artist = v,
+            GetFromLookup: r => r.ArtistName,
+            GetFromCandidate: c => c.Artist,
+            GetFromItunes: t => (string?)t.Artist,
+            SetOnItunes: (t, v) => t.Artist = v,
             GetFromFileTag: t => t.Performers.FirstOrDefault(),
             SetOnFileTag: (t, v) => t.Performers = AsArray(v),
             UpdateByDefault: true);
 
     public static readonly TrackField AlbumArtist =
         new("Album Artist", "AlbumArtist",
-            r => r.AlbumArtist,
-            t => (string?)t.AlbumArtist,
-            (t, v) => t.AlbumArtist = v,
+            GetFromLookup: r => r.AlbumArtist,
+            GetFromCandidate: c => c.AlbumArtist ?? c.Artist,
+            GetFromItunes: t => (string?)t.AlbumArtist,
+            SetOnItunes: (t, v) => t.AlbumArtist = v,
             GetFromFileTag: t => t.AlbumArtists.FirstOrDefault(),
             SetOnFileTag: (t, v) => t.AlbumArtists = AsArray(v),
             UpdateByDefault: true);
 
     public static readonly TrackField AlbumName =
         new("Album Name", "collectionName",
-            r => r.CollectionName,
-            t => (string?)t.Album,
-            (t, v) => t.Album = v,
+            GetFromLookup: r => r.CollectionName,
+            GetFromCandidate: c => c.Album,
+            GetFromItunes: t => (string?)t.Album,
+            SetOnItunes: (t, v) => t.Album = v,
             GetFromFileTag: t => t.Album,
             SetOnFileTag: (t, v) => t.Album = AsString(v),
             UpdateByDefault: true);
 
     public static readonly TrackField Year =
         new("Year", "year",
-            r => r.Year,
-            t => (int?)t.Year,
-            (t, v) => t.Year = v,
+            GetFromLookup: r => r.Year,
+            GetFromCandidate: c => c.Year,
+            GetFromItunes: t => (int?)t.Year,
+            SetOnItunes: (t, v) => t.Year = v,
             GetFromFileTag: t => t.Year > 0 ? (int?)t.Year : null,
             SetOnFileTag: (t, v) => t.Year = AsUint(v),
             CoerceWrite: CoerceInt,
@@ -57,18 +63,20 @@ public static class TrackFields
 
     public static readonly TrackField Genre =
         new("Genre", "primaryGenreName",
-            r => r.PrimaryGenreName,
-            t => (string?)t.Genre,
-            (t, v) => t.Genre = v,
+            GetFromLookup: r => r.PrimaryGenreName,
+            GetFromCandidate: c => c.Genre,
+            GetFromItunes: t => (string?)t.Genre,
+            SetOnItunes: (t, v) => t.Genre = v,
             GetFromFileTag: t => t.Genres.FirstOrDefault(),
             SetOnFileTag: (t, v) => t.Genres = AsArray(v),
             UpdateByDefault: true);
 
     public static readonly TrackField TrackNumber =
         new("Track Number", "trackNumber",
-            r => r.TrackNumber,
-            t => (int?)t.TrackNumber,
-            (t, v) => t.TrackNumber = v,
+            GetFromLookup: r => r.TrackNumber,
+            GetFromCandidate: c => c.TrackNumber,
+            GetFromItunes: t => (int?)t.TrackNumber,
+            SetOnItunes: (t, v) => t.TrackNumber = v,
             GetFromFileTag: t => t.Track > 0 ? (int?)t.Track : null,
             SetOnFileTag: (t, v) => t.Track = AsUint(v),
             CoerceWrite: CoerceInt,
@@ -76,9 +84,10 @@ public static class TrackFields
 
     public static readonly TrackField TrackCount =
         new("Track Count", "trackCount",
-            r => r.TrackCount,
-            t => (int?)t.TrackCount,
-            (t, v) => t.TrackCount = v,
+            GetFromLookup: r => r.TrackCount,
+            GetFromCandidate: c => c.TrackCount,
+            GetFromItunes: t => (int?)t.TrackCount,
+            SetOnItunes: (t, v) => t.TrackCount = v,
             GetFromFileTag: t => t.TrackCount > 0 ? (int?)t.TrackCount : null,
             SetOnFileTag: (t, v) => t.TrackCount = AsUint(v),
             CoerceWrite: CoerceInt,
@@ -86,9 +95,10 @@ public static class TrackFields
 
     public static readonly TrackField DiscNumber =
         new("Disc Number", "discNumber",
-            r => r.DiscNumber,
-            t => (int?)t.DiscNumber,
-            (t, v) => t.DiscNumber = v,
+            GetFromLookup: r => r.DiscNumber,
+            GetFromCandidate: c => c.DiscNumber,
+            GetFromItunes: t => (int?)t.DiscNumber,
+            SetOnItunes: (t, v) => t.DiscNumber = v,
             GetFromFileTag: t => t.Disc > 0 ? (int?)t.Disc : null,
             SetOnFileTag: (t, v) => t.Disc = AsUint(v),
             CoerceWrite: CoerceInt,
@@ -96,9 +106,10 @@ public static class TrackFields
 
     public static readonly TrackField DiscCount =
         new("Disc Count", "discCount",
-            r => r.DiscCount,
-            t => (int?)t.DiscCount,
-            (t, v) => t.DiscCount = v,
+            GetFromLookup: r => r.DiscCount,
+            GetFromCandidate: c => c.DiscCount,
+            GetFromItunes: t => (int?)t.DiscCount,
+            SetOnItunes: (t, v) => t.DiscCount = v,
             GetFromFileTag: t => t.DiscCount > 0 ? (int?)t.DiscCount : null,
             SetOnFileTag: (t, v) => t.DiscCount = AsUint(v),
             CoerceWrite: CoerceInt,
@@ -108,12 +119,13 @@ public static class TrackFields
     /// Album artwork, exposed by the Search API as artworkUrl100. The value
     /// is a URL; "3. Update tracks" downloads it (upgraded to 600x600) and
     /// writes it through <see cref="Tracks.ITaggableTrack.WriteArtwork"/>,
-    /// so this field is special-cased in the app's update loop.
+    /// so this field is special-cased in the app's update loop. Candidates
+    /// from other sources carry a direct artwork URL.
     /// </summary>
     public static readonly TrackField Artwork =
         new("Album Artwork", "artworkUrl100",
-            r => r.ArtworkUrl100,
-            _ => null,
+            GetFromLookup: r => r.ArtworkUrl100,
+            GetFromCandidate: c => c.ArtworkUrl,
             SetOnItunes: null,
             UpdateByDefault: true);
 
@@ -123,8 +135,9 @@ public static class TrackFields
     /// </summary>
     public static readonly TrackField Filename =
         new("Filename", "Filename",
-            _ => null,
-            t => (string?)t.Location,
+            GetFromLookup: _ => null,
+            GetFromCandidate: _ => null,
+            GetFromItunes: t => (string?)t.Location,
             SetOnItunes: null,
             NullValue: "[unknown]",
             VisibleInOptions: false);
