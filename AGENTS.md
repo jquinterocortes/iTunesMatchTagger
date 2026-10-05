@@ -29,16 +29,41 @@ Instructions for AI coding agents working in this repository.
 
 ## v2 (`src/v2`)
 
-- .NET 10, SDK-style, WinForms app + Core library + xUnit tests. Build/test with:
+- .NET 10, SDK-style, three projects in `src/v2/iTunesMatchTaggerV2.slnx`
+  (**note the `.slnx` extension** - the .NET 10 SDK's XML solution format):
   ```
-  dotnet build src/v2/iTunesMatchTaggerV2.sln
-  dotnet test  src/v2/iTunesMatchTaggerV2.sln
+  dotnet build src/v2/iTunesMatchTaggerV2.slnx
+  dotnet test  src/v2/iTunesMatchTaggerV2.slnx
   ```
-- **No COMReference anywhere.** iTunes COM is accessed with `dynamic` late binding via `Type.GetTypeFromProgID("iTunes.Application")` — iTunes is needed at *runtime* only, never to build.
+- `src/iTunesMatchTagger.Core` (net10.0): `Lookup/` Search API client + DTO
+  + store countries, `Tracks/` TrackIdReader + `ITaggableTrack`
+  (`ComTrack` COM-backed, `FileTrack` TagLib#-backed), `Fields/` the
+  `TrackField` catalog, `ITunes/` the dynamic COM client, `Settings/` JSON
+  user settings.
+- `src/iTunesMatchTagger.App` (net10.0-windows, WinForms): `MainForm.cs`
+  builds the UI **in code** - there are no Designer files; `TrackRow` /
+  `OptionRow` are the grid row models.
+- `tests/iTunesMatchTagger.Core.Tests` (xUnit): TrackIdReader with
+  synthetic bytes, Search client with a fake `HttpMessageHandler`, field
+  map coverage. Keep Core logic pure so it stays testable without iTunes
+  or real audio files.
+- **No COMReference anywhere.** iTunes COM is accessed with `dynamic` late
+  binding via `Type.GetTypeFromProgID("iTunes.Application")` — iTunes is
+  needed at *runtime* only, never to build.
 - iTunes COM collections are 1-based (`collection[i]` for `i` in `1..Count`).
-- Track-ID binary parsing is a pure function in Core (`TrackIdReader`) — unit-test it with synthetic bytes, don't need real audio files.
-- Standalone mode (no iTunes) uses TagLibSharp to read/write tags of m4a/mp3 files directly.
-- Runtime prerequisites to manually verify the app: Windows + .NET 10 Desktop Runtime + iTunes running with iTunes Match tracks selected.
+- `TrackField` (in Core) maps one field across all three back ends (Search
+  API JSON, iTunes COM, TagLib# Tag). Add new taggable fields there - never
+  with string-based reflection.
+- UI-thread discipline: COM access and `TrackRow` mutations happen only on
+  the UI thread; background lookups report through `IProgress<T>`. Do not
+  raise `TrackRow.PropertyChanged` from worker threads (DataGridView is
+  not thread-safe).
+- The exe must start without iTunes installed (COM is lazy); smoke-test by
+  launching it and killing it after a few seconds.
+- App settings: JSON at `%AppData%\iTunesMatchTagger\settings.json`
+  (`AppSettings`), not app.config.
+- Runtime prerequisites to verify the full workflow: Windows + .NET 10
+  Desktop Runtime + iTunes running with iTunes Match tracks selected.
 
 ## Conventions
 

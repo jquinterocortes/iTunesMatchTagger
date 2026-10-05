@@ -29,6 +29,20 @@ from the `"song"` marker in the first 1 KB of the file itself.
 | `src/itunes-match-tagger/` | Pristine import of the original project (upstream SVN **r6**, last change 2012-10-07). Legacy, kept as baseline and reference. |
 | `src/v2/` | Modern rewrite: .NET 10, WinForms, async I/O, plus a standalone mode that tags audio files directly without iTunes. |
 
+## v2
+
+```
+dotnet build src/v2/iTunesMatchTaggerV2.slnx
+dotnet test  src/v2/iTunesMatchTaggerV2.slnx
+dotnet run --project src/v2/src/iTunesMatchTagger.App
+```
+
+- **iTunes mode**: select tracks in iTunes → *1. Get selected tracks* →
+  *2. Lookup tracks* → *3. Update tracks*.
+- **Standalone mode**: *Load folder...* with m4a/mp3 files — tags are read
+  and written directly with TagLib#; files with an embedded iTunes Match
+  ID are looked up by ID, the rest by artist/title search.
+
 ## Legacy (v1)
 
 Classic non-SDK C# project targeting .NET Framework 4.8 (x86), with an
@@ -40,11 +54,13 @@ resolved from the registry.
 ## Roadmap (v2)
 
 - [x] Import upstream snapshot with full provenance
-- [ ] Core library: iTunes Search API client, binary Track-ID reader, field mapping
-- [ ] WinForms app on .NET 10: same 3-step workflow, async/parallel lookups
-- [ ] iTunes COM integration without build-time COM references (`dynamic` + ProgID)
-- [ ] Standalone mode: scan a folder of m4a/mp3 files and write tags directly (TagLib#)
-- [ ] Unit tests for all core logic
+- [x] Core library: iTunes Search API client, binary Track-ID reader, typed field mapping
+- [x] WinForms app on .NET 10: same 3-step workflow, async/parallel lookups
+- [x] iTunes COM integration without build-time COM references (`dynamic` + ProgID)
+- [x] Standalone mode: scan a folder of m4a/mp3 files and write tags directly (TagLib#)
+- [x] Unit tests for all core logic (24 passing)
+- [ ] CI workflow (build + test on windows-latest)
+- [ ] Release packaging (self-contained single-file exe)
 
 ## Credits & provenance
 
