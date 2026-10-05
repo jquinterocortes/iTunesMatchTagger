@@ -417,7 +417,7 @@ public sealed class MainForm : Form
             row.LookupSuccess = false;
             row.ClearProposed();
             row.SetArtworkImage(null);
-            row.SetStatus("Not found in any selected country", StatusKind.Error);
+            row.SetStatus("Not found in selected countries - the ID may be delisted from Apple's catalog", StatusKind.Error);
             Log($"Not found: {row.File} (Track ID {row.Track.TrackId})", LogSeverity.Information);
         }
 
