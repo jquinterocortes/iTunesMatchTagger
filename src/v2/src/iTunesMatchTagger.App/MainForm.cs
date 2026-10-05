@@ -57,8 +57,8 @@ public sealed class MainForm : Form
 
         Text = $"iTunes Match Tagger v2 - v{typeof(MainForm).Assembly.GetName().Version?.ToString(3)}";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(1080, 760);
-        MinimumSize = new Size(940, 620);
+        ClientSize = new Size(1180, 780);
+        MinimumSize = new Size(1020, 620);
 
         BuildLayout();
 
@@ -113,6 +113,10 @@ public sealed class MainForm : Form
             MessageBox.Show(this,
                 "Could not talk to iTunes. Make sure iTunes for Windows is installed and running, then try again.",
                 Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        catch (Exception ex)
+        {
+            Log($"Unexpected error: {ex.Message}", LogSeverity.Error);
         }
     }
 
@@ -227,6 +231,7 @@ public sealed class MainForm : Form
         }
 
         SetBusy(true);
+        _cancellation = new CancellationTokenSource();
         _progress.Value = 0;
         _progress.Maximum = _rows.Count;
         Log($"Lookup started: {_rows.Count} track(s) across {countries.Count} countr(ies).");
@@ -235,7 +240,7 @@ public sealed class MainForm : Form
         {
             await Parallel.ForEachAsync(
                 _rows,
-                new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = _cancellation!.Token },
+                new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = _cancellation.Token },
                 async (row, cancellationToken) =>
                 {
                     var found = await LookupRowAsync(row, countries, cancellationToken).ConfigureAwait(false);
@@ -249,6 +254,10 @@ public sealed class MainForm : Form
             Log("Lookup cancelled.", LogSeverity.Warning);
         }
         catch (HttpRequestException ex)
+        {
+            Log($"Lookup failed: {ex.Message}", LogSeverity.Error);
+        }
+        catch (Exception ex)
         {
             Log($"Lookup failed: {ex.Message}", LogSeverity.Error);
         }
@@ -395,6 +404,10 @@ public sealed class MainForm : Form
 
             Log("Update complete.");
             MessageBox.Show(this, "Update complete!", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            Log($"Update failed: {ex.Message}", LogSeverity.Error);
         }
         finally
         {
@@ -652,50 +665,44 @@ public sealed class MainForm : Form
 
     private Control BuildBottomBar()
     {
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1,
-        };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        _progress = new ProgressBar
-        {
-            Dock = DockStyle.Fill,
-            Height = 22,
-        };
-
-        var buttons = new FlowLayoutPanel
+        // One plain FlowLayoutPanel: every control keeps its preferred size.
+        // (Docking a FlowLayoutPanel inside an auto-sized TableLayoutPanel
+        // column breaks the preferred-size measurement and clipped buttons.)
+        var bar = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false,
         };
 
-        _btnGet = new Button { Text = "1. Get selected tracks", AutoSize = true };
+        _progress = new ProgressBar
+        {
+            Width = 200,
+            Height = 22,
+            Margin = new Padding(0, 13, 12, 13),
+        };
+
+        var buttonMargin = new Padding(0, 10, 8, 10);
+        _btnGet = new Button { Text = "1. Get selected tracks", AutoSize = true, Margin = buttonMargin };
         _btnGet.Click += BtnGet_Click;
-        _btnLookup = new Button { Text = "2. Lookup tracks", AutoSize = true };
+        _btnLookup = new Button { Text = "2. Lookup tracks", AutoSize = true, Margin = buttonMargin };
         _btnLookup.Click += BtnLookup_Click;
-        _btnUpdate = new Button { Text = "3. Update tracks", AutoSize = true };
+        _btnUpdate = new Button { Text = "3. Update tracks", AutoSize = true, Margin = buttonMargin };
         _btnUpdate.Click += BtnUpdate_Click;
-        _btnLoadFolder = new Button { Text = "Load folder...", AutoSize = true };
+        _btnLoadFolder = new Button { Text = "Load folder...", AutoSize = true, Margin = buttonMargin };
         _btnLoadFolder.Click += BtnLoadFolder_Click;
-        _btnInfo = new Button { Text = "Info", AutoSize = true };
+        _btnInfo = new Button { Text = "Info", AutoSize = true, Margin = buttonMargin };
         _btnInfo.Click += BtnInfo_Click;
-        _showDebug = new CheckBox { Text = "Show debug", AutoSize = true, Checked = false, Padding = new Padding(8, 6, 0, 0) };
+        _showDebug = new CheckBox { Text = "Show debug", AutoSize = true, Margin = new Padding(12, 12, 0, 0) };
 
-        buttons.Controls.Add(_btnGet);
-        buttons.Controls.Add(_btnLookup);
-        buttons.Controls.Add(_btnUpdate);
-        buttons.Controls.Add(_btnLoadFolder);
-        buttons.Controls.Add(_btnInfo);
-        buttons.Controls.Add(_showDebug);
-
-        panel.Controls.Add(_progress, 0, 0);
-        panel.Controls.Add(buttons, 1, 0);
-        return panel;
+        bar.Controls.Add(_progress);
+        bar.Controls.Add(_btnGet);
+        bar.Controls.Add(_btnLookup);
+        bar.Controls.Add(_btnUpdate);
+        bar.Controls.Add(_btnLoadFolder);
+        bar.Controls.Add(_btnInfo);
+        bar.Controls.Add(_showDebug);
+        return bar;
     }
 
     // ------------------------------------------------------------------
