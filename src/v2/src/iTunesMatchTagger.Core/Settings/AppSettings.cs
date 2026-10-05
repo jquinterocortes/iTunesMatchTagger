@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using iTunesMatchTagger.Core.Lookup;
+using iTunesMatchTagger.Core.Sources;
 
 namespace iTunesMatchTagger.Core.Settings;
 
@@ -17,6 +18,11 @@ public sealed class AppSettings
     };
 
     public List<string> SelectedCountries { get; set; } = [.. StoreCountries.DefaultSelected];
+
+    /// <summary>Per-source options for the tag-source fallback chain. The list is the fallback order after Apple.</summary>
+    public List<TagSourceSettings> Sources { get; set; } = [.. TagSourceCatalog.All
+        .Where(static s => s.Id != TagSources.ITunes)
+        .Select(static s => new TagSourceSettings { Id = s.Id, Enabled = false, Token = null })];
 
     public Dictionary<string, FieldOptions> Fields { get; set; } = [];
 
