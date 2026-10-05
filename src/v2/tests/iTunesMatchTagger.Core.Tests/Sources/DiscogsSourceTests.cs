@@ -67,7 +67,10 @@ public sealed class DiscogsSourceTests
         var url = seen.RequestUri!.ToString();
         Assert.Contains("/database/search?", url);
         Assert.Contains("type=release", url);
-        Assert.Contains("token=abc", url);
+
+        // the token travels in the Authorization header, not the URL
+        Assert.DoesNotContain("token", url, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Discogs token=abc", seen.Headers.Authorization?.ToString());
     }
 
     [Fact]

@@ -48,8 +48,15 @@ public abstract class HttpTagSource : ITagSource
 
     /// <summary>GET JSON (case-insensitive names) and deserialize; HttpClient-level failure surfaces as HttpRequestException.</summary>
     protected async Task<T> GetJsonAsync<T>(string url, CancellationToken cancellationToken)
+        => await GetJsonAsync<T>(url, null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>GET JSON (case-insensitive names) with a per-request configuration hook (e.g. auth headers). The User-Agent is already on the client's default headers.</summary>
+    protected async Task<T> GetJsonAsync<T>(string url, Action<HttpRequestMessage>? configureRequest, CancellationToken cancellationToken)
     {
-        using var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        configureRequest?.Invoke(request);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         return await response.Content
             .ReadFromJsonAsync<T>(SourceJson.Options, cancellationToken)

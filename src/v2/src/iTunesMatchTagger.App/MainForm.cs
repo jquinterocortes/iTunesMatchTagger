@@ -51,6 +51,7 @@ public sealed class MainForm : Form
 
     private CheckedListBox _countries = new();
     private CheckedListBox _sourcesList = new();
+    private CheckBox _alwaysQueryAll = new();
     private TextBox _discogsToken = new();
     private ComboBox _candidatePicker = new();
     private DataGridView _optionsGrid = new();
@@ -305,6 +306,7 @@ public sealed class MainForm : Form
         _progress.Maximum = _rows.Count;
         Log($"Lookup started: {_rows.Count} track(s), {countries.Count} countr(ies), {fallbackSources.Count} fallback source(s).");
         var skippedSources = new HashSet<string>(StringComparer.Ordinal);
+        var alwaysQueryAll = _alwaysQueryAll.Checked;
 
         try
         {
@@ -313,7 +315,7 @@ public sealed class MainForm : Form
                 new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = _cancellation.Token },
                 async (row, cancellationToken) =>
                 {
-                    var outcome = await LookupRowAsync(row, countries, fallbackSources, skippedSources, cancellationToken).ConfigureAwait(false);
+                    var outcome = await LookupRowAsync(row, countries, fallbackSources, alwaysQueryAll, skippedSources, cancellationToken).ConfigureAwait(false);
                     _lookupSink.Report(outcome);
                 }).ConfigureAwait(true);
 
@@ -383,6 +385,7 @@ public sealed class MainForm : Form
         TrackRow row,
         IReadOnlyList<string> countries,
         IReadOnlyList<ITagSource> fallbackSources,
+        bool alwaysQueryAll,
         ISet<string> skippedSources,
         CancellationToken cancellationToken)
     {
@@ -444,6 +447,7 @@ public sealed class MainForm : Form
         // Stage 3 - the other enabled tag sources, in fallback order.
         // Every enabled source is queried (not just the first that finds
         // something) so the user can compare candidates across sources.
+        // With alwaysQueryAll the sources run even after an Apple hit.
         var candidates = new List<TagCandidate>();
         var autoSelectIndex = -1;
 
@@ -452,7 +456,8 @@ public sealed class MainForm : Form
             candidates.Add(ITunesSource.FromLookupResult(appleResult));
             autoSelectIndex = 0;
         }
-        else if (fallbackSources.Count > 0)
+
+        if ((appleResult is null || alwaysQueryAll) && fallbackSources.Count > 0)
         {
             var term = new TagQuery(
                 Artist: row.GetCurrent("artistName"),
@@ -1238,6 +1243,14 @@ public sealed class MainForm : Form
         tokenTip.SetToolTip(_discogsToken, "Personal access token from discogs.com/settings/developers");
         sourcesBottom.Controls.Add(_discogsToken, 1, 0);
 
+        _alwaysQueryAll = new CheckBox
+        {
+            Text = "Always query all enabled sources, even when Apple finds the track",
+            Dock = DockStyle.Bottom,
+            AutoSize = false,
+            Height = 26,
+        };
+
         var sourcesHint = new Label
         {
             Text = "Apple (iTunes Search) is always tried first.",
@@ -1247,6 +1260,7 @@ public sealed class MainForm : Form
         };
 
         sourcesGroup.Controls.Add(_sourcesList);
+        sourcesGroup.Controls.Add(_alwaysQueryAll);
         sourcesGroup.Controls.Add(sourcesBottom);
         sourcesGroup.Controls.Add(sourcesHint);
 
@@ -1686,6 +1700,7 @@ public sealed class MainForm : Form
         }
 
         _discogsToken.Text = settings.Sources.FirstOrDefault(static s => s.Id == TagSources.Discogs)?.Token ?? string.Empty;
+        _alwaysQueryAll.Checked = settings.QueryAllSources;
     }
 
     private void SaveSettings()
@@ -1693,6 +1708,7 @@ public sealed class MainForm : Form
         var settings = new AppSettings
         {
             SelectedCountries = [.. CheckedCountries()],
+            QueryAllSources = _alwaysQueryAll.Checked,
             Sources =
             [
                 new TagSourceSettings { Id = TagSources.ITunes, Enabled = true, Token = null },

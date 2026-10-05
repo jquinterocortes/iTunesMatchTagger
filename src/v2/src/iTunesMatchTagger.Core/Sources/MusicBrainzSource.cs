@@ -13,6 +13,11 @@ public sealed class MusicBrainzSource : HttpTagSource
 {
     public const string BaseUrl = "https://musicbrainz.org/ws/2/";
 
+    // MusicBrainz allows ~1 request per second (503s above that). Shared
+    // across instances so parallel per-track lookups stay legal.
+    private static readonly SemaphoreSlim RateLock = new(1, 1);
+    private static DateTime _nextAllowedUtc = DateTime.MinValue;
+
     public MusicBrainzSource(HttpClient? httpClient = null)
         : base(httpClient)
     {
@@ -42,6 +47,7 @@ public sealed class MusicBrainzSource : HttpTagSource
         }
 
         var url = $"{BaseUrl}recording?query={Uri.EscapeDataString(terms.ToString())}&fmt=json&limit=5";
+        await RateLimitAsync(cancellationToken).ConfigureAwait(false);
         var response = await GetJsonAsync<MusicBrainzSearchResponse>(url, cancellationToken).ConfigureAwait(false);
         return [.. response.Recordings
             .Where(static r => r.Score > 20)
@@ -77,6 +83,25 @@ public sealed class MusicBrainzSource : HttpTagSource
         }
 
         return year;
+    }
+
+    private static async Task RateLimitAsync(CancellationToken cancellationToken)
+    {
+        await RateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var wait = _nextAllowedUtc - DateTime.UtcNow;
+            if (wait > TimeSpan.Zero)
+            {
+                await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
+            }
+
+            _nextAllowedUtc = DateTime.UtcNow.AddMilliseconds(1050);
+        }
+        finally
+        {
+            RateLock.Release();
+        }
     }
 }
 

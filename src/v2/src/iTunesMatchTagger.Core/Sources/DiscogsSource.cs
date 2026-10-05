@@ -28,7 +28,12 @@ public sealed class DiscogsSource : HttpTagSource
 
     public override string Description => "Discogs (token required, physical-release data)";
 
-    /// <summary>Personal access token, set at construction from settings.</summary>
+    /// <summary>
+    /// Personal access token (the string generated under
+    /// "Generate new token" at discogs.com/settings/developers). Not the
+    /// OAuth Consumer Key/Secret pair of a registered application - that
+    /// flow would need the full OAuth 1.0a handshake with token signing.
+    /// </summary>
     public string? Token { get; set; }
 
     public override async Task<IReadOnlyList<TagCandidate>> SearchAsync(TagQuery query, CancellationToken cancellationToken = default)
@@ -46,13 +51,18 @@ public sealed class DiscogsSource : HttpTagSource
         }
 
         // type=release keeps masters out (a master is a group of reissues,
-        // not a concrete release with one artwork per pressing).
+        // not a concrete release with one artwork per pressing). The token
+        // travels in the Authorization header instead of the URL, so it does
+        // not leak into proxied request logs; sent per request to keep it
+        // away from CDN artwork downloads.
         var url = $"{BaseUrl}database/search?" +
                   $"q={Uri.EscapeDataString(term)}" +
                   "&type=release" +
-                  $"&token={Uri.EscapeDataString(Token)}" +
                   "&per_page=5";
-        var response = await GetJsonAsync<DiscogsSearchResponse>(url, cancellationToken).ConfigureAwait(false);
+        var response = await GetJsonAsync<DiscogsSearchResponse>(
+            url,
+            request => request.Headers.Authorization = new AuthenticationHeaderValue("Discogs", $"token={Token}"),
+            cancellationToken).ConfigureAwait(false);
         return [.. response.Results.Select(ToCandidate)];
     }
 

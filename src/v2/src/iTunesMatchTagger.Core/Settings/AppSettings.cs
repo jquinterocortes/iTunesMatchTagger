@@ -19,6 +19,9 @@ public sealed class AppSettings
 
     public List<string> SelectedCountries { get; set; } = [.. StoreCountries.DefaultSelected];
 
+    /// <summary>Query every enabled tag source on every lookup, even when Apple matches (slower, richer comparison).</summary>
+    public bool QueryAllSources { get; set; }
+
     /// <summary>Per-source options for the tag-source fallback chain. The list is the fallback order after Apple.</summary>
     public List<TagSourceSettings> Sources { get; set; } = [.. TagSourceCatalog.All
         .Where(static s => s.Id != TagSources.ITunes)
