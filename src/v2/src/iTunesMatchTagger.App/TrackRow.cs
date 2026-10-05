@@ -1,123 +1,121 @@
 using System.ComponentModel;
 using iTunesMatchTagger.Core.Fields;
-using iTunesMatchTagger.Core.ITunes;
 using iTunesMatchTagger.Core.Tracks;
 
 namespace iTunesMatchTagger.App;
 
+/// <summary>Severity used for coloring status text in the list and detail panel.</summary>
+public enum StatusKind
+{
+    Neutral,
+    Success,
+    Warning,
+    Error,
+}
+
 /// <summary>
-/// One row of the tracks grid: current tag values as display strings plus
-/// lookup state. Values are strings everywhere so the grid, the manual
-/// override column and both track back ends share one representation.
+/// One track in the validator: <b>current</b> values (read from iTunes/the
+/// files), <b>proposed</b> values (from the lookup), artwork images and a
+/// status line. Values are strings everywhere so the owner-drawn list, the
+/// comparison table and both track back ends share one representation.
 /// </summary>
 public sealed class TrackRow : INotifyPropertyChanged
 {
-    /// <summary>Grid column (DataPropertyName) for each field's LookupMember.</summary>
-    public static readonly IReadOnlyDictionary<string, string> PropertyByLookupMember =
-        new Dictionary<string, string>
-        {
-            ["trackName"] = nameof(TrackName),
-            ["artistName"] = nameof(ArtistName),
-            ["AlbumArtist"] = nameof(AlbumArtist),
-            ["collectionName"] = nameof(Album),
-            ["year"] = nameof(Year),
-            ["primaryGenreName"] = nameof(Genre),
-            ["trackNumber"] = nameof(TrackNumber),
-            ["trackCount"] = nameof(TrackCount),
-            ["discNumber"] = nameof(DiscNumber),
-            ["discCount"] = nameof(DiscCount),
-            ["artworkUrl100"] = nameof(Artwork),
-            ["Filename"] = nameof(File),
-        };
-
-    private string? _trackName;
-    private string? _artistName;
-    private string? _albumArtist;
-    private string? _album;
-    private string? _year;
-    private string? _genre;
-    private string? _trackNumber;
-    private string? _trackCount;
-    private string? _discNumber;
-    private string? _discCount;
-    private string? _artwork;
+    private readonly Dictionary<string, string?> _current = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> _proposed = new(StringComparer.Ordinal);
+    private string _statusMessage = string.Empty;
+    private StatusKind _statusSeverity = StatusKind.Neutral;
+    private Image? _artworkImage;
+    private Image? _currentArtworkImage;
 
     public TrackRow(ITaggableTrack track)
     {
         Track = track;
         foreach (var field in TrackFields.All)
         {
-            SetValue(field.LookupMember, track.ReadField(field)?.ToString());
+            _current[field.LookupMember] = track.ReadField(field)?.ToString();
         }
     }
 
     public ITaggableTrack Track { get; }
 
+    /// <summary>True when the last lookup produced a result for this track.</summary>
     public bool LookupSuccess { get; set; }
 
     public string File => Track.Location ?? "[unknown]";
 
-    public string TrackId => Track.TrackId > 0 ? Track.TrackId.ToString() : string.Empty;
+    public string TrackIdText => Track.TrackId > 0 ? Track.TrackId.ToString() : string.Empty;
 
-    public string? TrackName { get => _trackName; private set { _trackName = value; RaisePropertyChanged(nameof(TrackName)); } }
+    public string StatusMessage => _statusMessage;
 
-    public string? ArtistName { get => _artistName; private set { _artistName = value; RaisePropertyChanged(nameof(ArtistName)); } }
+    public StatusKind StatusSeverity => _statusSeverity;
 
-    public string? AlbumArtist { get => _albumArtist; private set { _albumArtist = value; RaisePropertyChanged(nameof(AlbumArtist)); } }
+    /// <summary>Artwork preview from the lookup result (or null).</summary>
+    public Image? ArtworkImage => _artworkImage;
 
-    public string? Album { get => _album; private set { _album = value; RaisePropertyChanged(nameof(Album)); } }
+    /// <summary>Artwork currently embedded in the file (or null).</summary>
+    public Image? CurrentArtworkImage => _currentArtworkImage;
 
-    public string? Year { get => _year; private set { _year = value; RaisePropertyChanged(nameof(Year)); } }
+    public string? GetCurrent(string lookupMember) =>
+        _current.TryGetValue(lookupMember, out var value) ? value : null;
 
-    public string? Genre { get => _genre; private set { _genre = value; RaisePropertyChanged(nameof(Genre)); } }
+    public string? GetProposed(string lookupMember) =>
+        _proposed.TryGetValue(lookupMember, out var value) ? value : null;
 
-    public string? TrackNumber { get => _trackNumber; private set { _trackNumber = value; RaisePropertyChanged(nameof(TrackNumber)); } }
-
-    public string? TrackCount { get => _trackCount; private set { _trackCount = value; RaisePropertyChanged(nameof(TrackCount)); } }
-
-    public string? DiscNumber { get => _discNumber; private set { _discNumber = value; RaisePropertyChanged(nameof(DiscNumber)); } }
-
-    public string? DiscCount { get => _discCount; private set { _discCount = value; RaisePropertyChanged(nameof(DiscCount)); } }
-
-    public string? Artwork { get => _artwork; private set { _artwork = value; RaisePropertyChanged(nameof(Artwork)); } }
-
-    public string? GetValue(string lookupMember) => lookupMember switch
+    public void SetCurrent(string lookupMember, string? value)
     {
-        "trackName" => TrackName,
-        "artistName" => ArtistName,
-        "AlbumArtist" => AlbumArtist,
-        "collectionName" => Album,
-        "year" => Year,
-        "primaryGenreName" => Genre,
-        "trackNumber" => TrackNumber,
-        "trackCount" => TrackCount,
-        "discNumber" => DiscNumber,
-        "discCount" => DiscCount,
-        "artworkUrl100" => Artwork,
-        "Filename" => File,
-        _ => null,
-    };
-
-    public void SetValue(string lookupMember, string? value)
-    {
-        switch (lookupMember)
+        if (string.Equals(GetCurrent(lookupMember), value, StringComparison.Ordinal))
         {
-            case "trackName": TrackName = value; break;
-            case "artistName": ArtistName = value; break;
-            case "AlbumArtist": AlbumArtist = value; break;
-            case "collectionName": Album = value; break;
-            case "year": Year = value; break;
-            case "primaryGenreName": Genre = value; break;
-            case "trackNumber": TrackNumber = value; break;
-            case "trackCount": TrackCount = value; break;
-            case "discNumber": DiscNumber = value; break;
-            case "discCount": DiscCount = value; break;
-            case "artworkUrl100": Artwork = value; break;
+            return;
         }
+
+        _current[lookupMember] = value;
+        Raise();
+    }
+
+    public void SetProposed(string lookupMember, string? value)
+    {
+        _proposed[lookupMember] = value;
+        Raise();
+    }
+
+    public void ClearProposed()
+    {
+        _proposed.Clear();
+        Raise();
+    }
+
+    public void SetStatus(string message, StatusKind severity)
+    {
+        _statusMessage = message;
+        _statusSeverity = severity;
+        Raise();
+    }
+
+    public void SetArtworkImage(Image? image)
+    {
+        _artworkImage?.Dispose();
+        _artworkImage = image;
+        Raise();
+    }
+
+    public void SetCurrentArtworkImage(Image? image)
+    {
+        _currentArtworkImage?.Dispose();
+        _currentArtworkImage = image;
+        Raise();
+    }
+
+    public void DisposeImages()
+    {
+        _artworkImage?.Dispose();
+        _artworkImage = null;
+        _currentArtworkImage?.Dispose();
+        _currentArtworkImage = null;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    private void RaisePropertyChanged(string propertyName) =>
+    private void Raise(string propertyName = "") =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

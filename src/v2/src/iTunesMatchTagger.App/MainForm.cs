@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using iTunesMatchTagger.Core.Fields;
 using iTunesMatchTagger.Core.ITunes;
@@ -9,9 +10,11 @@ using iTunesMatchTagger.Core.Tracks;
 namespace iTunesMatchTagger.App;
 
 /// <summary>
-/// Main window. Ports the upstream three-step workflow
-/// (get tracks - lookup - update) to .NET 10 with async lookups, and adds
-/// the standalone "Load folder" mode that tags files without iTunes.
+/// Main window: a master-detail tag validator.
+/// Left: track list with artwork thumbnails and per-track status.
+/// Right: the selected track's artwork (current vs from Apple) and a
+/// field-by-field comparison (current vs proposed) with differences
+/// highlighted, so every change can be reviewed before "3. Update tracks".
 /// COM objects are only touched on the UI thread; lookups run in parallel
 /// on background threads and report back through <see cref="Progress{T}"/>.
 /// </summary>
@@ -27,7 +30,7 @@ public sealed class MainForm : Form
 
     private sealed record LogEntry(string Message, LogSeverity Severity);
 
-    private sealed record LookupOutcome(TrackRow Row, ITunesLookupResult? Result);
+    private sealed record LookupOutcome(TrackRow Row, ITunesLookupResult? Result, string FoundIn, bool FoundViaSearch, byte[]? ArtworkBytes);
 
     private readonly ITunesComClient _itunes = new();
     private readonly ITunesSearchClient _search = new();
@@ -40,7 +43,12 @@ public sealed class MainForm : Form
 
     private CheckedListBox _countries = new();
     private DataGridView _optionsGrid = new();
-    private DataGridView _tracksGrid = new();
+    private ListBox _trackList = new();
+    private SplitContainer _splitter = new();
+    private DataGridView _detailGrid = new();
+    private PictureBox _artworkCurrentPic = new();
+    private PictureBox _artworkNewPic = new();
+    private Label _statusLabel = new();
     private TextBox _log = new();
     private ProgressBar _progress = new();
     private CheckBox _showDebug = new();
@@ -57,8 +65,8 @@ public sealed class MainForm : Form
 
         Text = $"iTunes Match Tagger v2 - v{typeof(MainForm).Assembly.GetName().Version?.ToString(3)}";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(1180, 780);
-        MinimumSize = new Size(1020, 620);
+        ClientSize = new Size(1240, 800);
+        MinimumSize = new Size(1080, 680);
 
         BuildLayout();
 
@@ -163,45 +171,74 @@ public sealed class MainForm : Form
 
     private void BindRows(IEnumerable<ITaggableTrack> tracks)
     {
-        // Rebind from scratch: assigning the same List instance would leave
-        // the grid showing stale rows (List<T> has no change notification).
-        _tracksGrid.DataSource = null;
+        foreach (var row in _rows)
+        {
+            row.PropertyChanged -= OnRowChanged;
+            row.DisposeImages();
+        }
+
         _rows.Clear();
-        _rows.AddRange(tracks.Select(t => new TrackRow(t)));
-        _tracksGrid.DataSource = _rows;
-        _tracksGrid.Refresh();
+        foreach (var track in tracks)
+        {
+            var row = new TrackRow(track);
+            row.PropertyChanged += OnRowChanged;
+            _rows.Add(row);
+        }
+
+        _trackList.BeginUpdate();
+        _trackList.Items.Clear();
+        foreach (var row in _rows)
+        {
+            _trackList.Items.Add(row);
+        }
+        _trackList.EndUpdate();
+
         ValidateRows();
+        FillDetail(null);
 
         Log($"{_rows.Count} track(s) loaded.");
         foreach (var row in _rows)
         {
-            LogDebug($"{row.File} -> Track ID {row.Track.TrackId}{(row.Track.TrackId > 0 ? "" : " (none)")}");
+            LogDebug($"{row.File} -> Track ID {row.Track.TrackId}{(row.Track.TrackId > 0 ? string.Empty : " (none)")}");
         }
     }
 
     private void ValidateRows()
     {
-        foreach (DataGridViewRow gridRow in _tracksGrid.Rows)
+        foreach (var row in _rows)
         {
-            if (gridRow.DataBoundItem is not TrackRow row)
+            if (row.Track.Location is null)
             {
-                continue;
+                row.SetStatus("Track is not downloaded!", StatusKind.Error);
             }
-
-            gridRow.ErrorText = row.Track.Location is null
-                ? "Track is not downloaded!"
-                : row.Track.TrackId == 0
-                    ? row.Track is ComTrack
-                        ? "Track is not matched!"
-                        : "No embedded Track ID - lookup will search by current tags"
-                    : string.Empty;
-
-            if (gridRow.ErrorText.Length > 0)
+            else if (row.Track.TrackId == 0)
             {
-                Log($"{gridRow.ErrorText} {row.File}", LogSeverity.Debug);
+                row.SetStatus(
+                    row.Track is ComTrack
+                        ? "Track is not matched (no embedded ID)"
+                        : "No embedded ID - lookup will search by tags",
+                    StatusKind.Warning);
+            }
+            else
+            {
+                row.SetStatus($"Matched - Track ID {row.Track.TrackId}", StatusKind.Neutral);
             }
         }
     }
+
+    private void OnRowChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        _trackList.Invalidate();
+        if (sender is TrackRow row && ReferenceEquals(SelectedRow(), row))
+        {
+            FillDetail(row);
+        }
+    }
+
+    private TrackRow? SelectedRow() =>
+        _trackList.SelectedIndex >= 0 && _trackList.SelectedIndex < _rows.Count
+            ? _rows[_trackList.SelectedIndex]
+            : null;
 
     // ------------------------------------------------------------------
     // 2. Lookup tracks
@@ -229,7 +266,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        if (!_options.Any(o => o.Update))
+        if (!_options.Any(static o => o.Update))
         {
             Log("No update fields checked.", LogSeverity.Error);
             MessageBox.Show(this, "No update fields checked.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -249,8 +286,8 @@ public sealed class MainForm : Form
                 new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = _cancellation.Token },
                 async (row, cancellationToken) =>
                 {
-                    var found = await LookupRowAsync(row, countries, cancellationToken).ConfigureAwait(false);
-                    _lookupSink.Report(new LookupOutcome(row, found));
+                    var outcome = await LookupRowAsync(row, countries, cancellationToken).ConfigureAwait(false);
+                    _lookupSink.Report(outcome);
                 }).ConfigureAwait(true);
 
             Log($"{_rows.Count(static r => r.LookupSuccess)} of {_rows.Count} track(s) found.");
@@ -275,77 +312,120 @@ public sealed class MainForm : Form
         }
     }
 
-    private async Task<ITunesLookupResult?> LookupRowAsync(TrackRow row, IReadOnlyList<string> countries, CancellationToken cancellationToken)
+    private async Task<LookupOutcome> LookupRowAsync(TrackRow row, IReadOnlyList<string> countries, CancellationToken cancellationToken)
     {
+        ITunesLookupResult? result = null;
+        var foundIn = string.Empty;
+        var viaSearch = false;
+
         if (row.Track.TrackId > 0)
         {
             foreach (var country in countries)
             {
-                var result = await _search.LookupTrackAsync(row.Track.TrackId, country, cancellationToken).ConfigureAwait(false);
-                if (result is not null)
+                var found = await _search.LookupTrackAsync(row.Track.TrackId, country, cancellationToken).ConfigureAwait(false);
+                if (found is not null)
                 {
                     LogDebug($"Track ID {row.Track.TrackId} found in {country}: {row.File}");
-                    return result;
+                    result = found;
+                    foundIn = country;
+                    break;
                 }
             }
 
-            // The embedded ID is dead in every selected storefront (Apple
-            // delists albums; the file keeps the old ID). Fall back to
-            // searching by the current tags - re-released albums come back
-            // under a new ID that this lookup would otherwise never find.
-            Log($"Track ID {row.Track.TrackId} not found in any selected country, trying search by current tags: {row.File}", LogSeverity.Information);
+            if (result is null)
+            {
+                // The embedded ID is dead in every selected storefront (Apple
+                // delists albums; the file keeps the old ID). Fall back to
+                // searching by the current tags - re-released albums come back
+                // under a new ID that an ID lookup would never find.
+                Log($"Track ID {row.Track.TrackId} not found in any selected country, trying search by current tags: {row.File}", LogSeverity.Information);
+            }
         }
         else
         {
             Log($"No embedded Track ID, searching by current tags: {row.File}", LogSeverity.Information);
         }
 
-        // Fallback: search by the tags currently on the track/file.
-        var term = $"{row.ArtistName} {row.TrackName}".Trim();
-        if (term.Length == 0)
+        if (result is null)
         {
-            Log($"No tags to search for: {row.File}", LogSeverity.Warning);
-            return null;
-        }
-
-        foreach (var country in countries)
-        {
-            var results = await _search.SearchAsync(term, country, cancellationToken).ConfigureAwait(false);
-            var first = results.FirstOrDefault(static r => r.Kind is null or "song");
-            if (first is not null)
+            var term = $"{row.GetCurrent("artistName")} {row.GetCurrent("trackName")}".Trim();
+            if (term.Length == 0)
             {
-                LogDebug($"Term '{term}' found in {country}: {row.File} (catalog Track ID {first.TrackId})");
-                return first;
+                Log($"No tags to search for: {row.File}", LogSeverity.Warning);
+            }
+            else
+            {
+                foreach (var country in countries)
+                {
+                    var results = await _search.SearchAsync(term, country, cancellationToken).ConfigureAwait(false);
+                    var first = results.FirstOrDefault(static r => r.Kind is null or "song");
+                    if (first is not null)
+                    {
+                        LogDebug($"Term '{term}' found in {country}: {row.File} (catalog Track ID {first.TrackId})");
+                        result = first;
+                        foundIn = country;
+                        viaSearch = true;
+                        break;
+                    }
+                }
             }
         }
 
-        return null;
+        byte[]? artworkBytes = null;
+        if (result?.ArtworkUrl100 is not null)
+        {
+            try
+            {
+                artworkBytes = await _search.DownloadArtworkAsync(result.ArtworkUrl100, 300, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                LogDebug($"Artwork preview download failed: {ex.Message}");
+            }
+        }
+
+        return new LookupOutcome(row, result, foundIn, viaSearch, artworkBytes);
     }
 
     /// <summary>Runs on the UI thread (posted through <see cref="Progress{T}"/>).</summary>
     private void ApplyLookupOutcome(LookupOutcome outcome)
     {
-        var (row, result) = outcome;
-        row.LookupSuccess = result is not null;
+        var row = outcome.Row;
+        _progress.PerformStep();
 
-        if (result is not null)
+        if (outcome.Result is not null)
         {
+            var result = outcome.Result;
+            row.LookupSuccess = true;
+
             foreach (var option in _options.Where(static o => o.Update))
             {
                 var value = option.Field.GetFromLookup(result);
-                if (value is not null)
-                {
-                    row.SetValue(option.Field.LookupMember, value.ToString());
-                }
+                row.SetProposed(option.Field.LookupMember, value?.ToString());
             }
+
+            row.SetArtworkImage(ToImage(outcome.ArtworkBytes));
+
+            row.SetStatus(
+                outcome.FoundViaSearch
+                    ? $"Found via search in {outcome.FoundIn} (catalog ID {result.TrackId})"
+                    : $"Found in {outcome.FoundIn}",
+                StatusKind.Success);
         }
         else
         {
+            row.LookupSuccess = false;
+            row.ClearProposed();
+            row.SetArtworkImage(null);
+            row.SetStatus("Not found in any selected country", StatusKind.Error);
             Log($"Not found: {row.File} (Track ID {row.Track.TrackId})", LogSeverity.Information);
         }
 
-        _progress.PerformStep();
-        _tracksGrid.Invalidate();
+        _trackList.Invalidate();
+        if (ReferenceEquals(SelectedRow(), row))
+        {
+            FillDetail(row);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -384,13 +464,13 @@ public sealed class MainForm : Form
             foreach (var row in _rows)
             {
                 var writes = new List<KeyValuePair<TrackField, object?>>();
-                string? artworkUrl = null;
+                string? artworkValue = null;
                 foreach (var option in active)
                 {
                     var value = option.Overwrite && !string.IsNullOrEmpty(option.OverwriteValue)
                         ? option.OverwriteValue
                         : row.LookupSuccess
-                            ? row.GetValue(option.Field.LookupMember)
+                            ? row.GetProposed(option.Field.LookupMember)
                             : null;
 
                     if (string.IsNullOrEmpty(value))
@@ -400,9 +480,9 @@ public sealed class MainForm : Form
 
                     if (option.Field == TrackFields.Artwork)
                     {
-                        // handled separately: the value is a URL that must be
-                        // downloaded before it can be embedded
-                        artworkUrl = value;
+                        // handled separately: the value is a URL to download
+                        // or a local image file path
+                        artworkValue = value;
                         continue;
                     }
 
@@ -410,33 +490,55 @@ public sealed class MainForm : Form
                     LogDebug($"{option.Field.DisplayName} = '{value}' -> {row.File}");
                 }
 
+                var fieldsWritten = 0;
                 try
                 {
                     row.Track.WriteFields(writes);
+                    fieldsWritten = writes.Count;
+                }
+                catch (Exception ex)
+                {
+                    Log($"Unable to write tags for '{row.File}': {ex.Message}", LogSeverity.Error);
+                }
 
-                    if (artworkUrl is not null && row.LookupSuccess)
+                var artworkWritten = false;
+                try
+                {
+                    if (artworkValue is not null)
                     {
-                        if (artworkUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                        if (File.Exists(artworkValue))
                         {
-                            var bytes = await _search.DownloadArtworkAsync(artworkUrl).ConfigureAwait(true);
+                            row.Track.WriteArtwork(await File.ReadAllBytesAsync(artworkValue).ConfigureAwait(true));
+                            LogDebug($"Artwork from '{artworkValue}' -> {row.File}");
+                            artworkWritten = true;
+                        }
+                        else if (artworkValue.StartsWith("http", StringComparison.OrdinalIgnoreCase) && row.LookupSuccess)
+                        {
+                            var bytes = await _search.DownloadArtworkAsync(artworkValue).ConfigureAwait(true);
                             row.Track.WriteArtwork(bytes);
                             LogDebug($"Artwork written ({bytes.Length} bytes) -> {row.File}");
+                            artworkWritten = true;
                         }
                         else
                         {
-                            LogDebug($"No artwork URL available for {row.File} (run a lookup first)");
+                            LogDebug($"No artwork available for {row.File} (run a lookup first)");
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log($"Unable to update '{row.File}': {ex.Message}", LogSeverity.Error);
+                    Log($"Unable to write artwork for '{row.File}': {ex.Message}", LogSeverity.Error);
                 }
 
-                // re-read the current values so the grid shows the result
+                var written = fieldsWritten + (artworkWritten ? 1 : 0);
+                row.SetStatus(
+                    written > 0 ? $"Updated ({written} field(s))" : "Nothing to update",
+                    written > 0 ? StatusKind.Success : StatusKind.Warning);
+
+                // re-read the current values so the comparison shows the result
                 foreach (var field in TrackFields.All)
                 {
-                    row.SetValue(field.LookupMember, row.Track.ReadField(field)?.ToString());
+                    row.SetCurrent(field.LookupMember, row.Track.ReadField(field)?.ToString());
                 }
 
                 _progress.PerformStep();
@@ -528,6 +630,197 @@ public sealed class MainForm : Form
         }
     }
 
+    private void TrackList_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        var row = SelectedRow();
+        if (row is null)
+        {
+            FillDetail(null);
+            return;
+        }
+
+        LoadCurrentArtwork(row);
+        FillDetail(row);
+    }
+
+    private void LoadCurrentArtwork(TrackRow row)
+    {
+        var bytes = row.Track.Location is null ? null : ArtworkReader.ReadFrontCover(row.Track.Location);
+        row.SetCurrentArtworkImage(ToImage(bytes));
+    }
+
+    private void FillDetail(TrackRow? row)
+    {
+        _detailGrid.Rows.Clear();
+
+        if (row is null)
+        {
+            _artworkCurrentPic.Image = null;
+            _artworkNewPic.Image = null;
+            _statusLabel.Text = "Select a track to review its tags.";
+            _statusLabel.ForeColor = SystemColors.ControlText;
+            return;
+        }
+
+        foreach (var field in TrackFields.All)
+        {
+            if (field.LookupMember == "Filename" || field == TrackFields.Artwork)
+            {
+                continue; // the list shows the file; artwork is shown as pictures
+            }
+
+            var current = row.GetCurrent(field.LookupMember);
+            var proposed = row.GetProposed(field.LookupMember);
+            var index = _detailGrid.Rows.Add(field.DisplayName, current ?? string.Empty, proposed ?? string.Empty);
+            if (current is not null || proposed is not null)
+            {
+                var changed = !string.Equals(current, proposed, StringComparison.Ordinal);
+                if (changed)
+                {
+                    _detailGrid.Rows[index].DefaultCellStyle.BackColor = Color.FromArgb(255, 246, 220);
+                }
+            }
+        }
+
+        _artworkCurrentPic.Image = row.CurrentArtworkImage;
+        _artworkNewPic.Image = row.ArtworkImage;
+
+        _statusLabel.Text = row.StatusMessage.Length == 0
+            ? "No lookup yet - click \"2. Lookup tracks\"."
+            : row.StatusMessage;
+        _statusLabel.ForeColor = row.StatusSeverity switch
+        {
+            StatusKind.Success => Color.FromArgb(0, 128, 0),
+            StatusKind.Warning => Color.FromArgb(176, 96, 0),
+            StatusKind.Error => Color.FromArgb(192, 0, 0),
+            _ => SystemColors.ControlText,
+        };
+    }
+
+    private bool WillChangeSomething(TrackRow row)
+    {
+        foreach (var option in _options.Where(static o => o.Update))
+        {
+            if (option.Overwrite && !string.IsNullOrEmpty(option.OverwriteValue))
+            {
+                return true;
+            }
+
+            if (row.LookupSuccess &&
+                !string.Equals(row.GetCurrent(option.Field.LookupMember), row.GetProposed(option.Field.LookupMember), StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void TrackList_DrawItem(object? sender, DrawItemEventArgs e)
+    {
+        if (e.Index < 0 || e.Index >= _rows.Count)
+        {
+            return;
+        }
+
+        var row = _rows[e.Index];
+        var selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+        var backColor = selected ? SystemColors.Highlight : SystemColors.Window;
+        var foreColor = selected ? SystemColors.HighlightText : SystemColors.WindowText;
+
+        using (var backBrush = new SolidBrush(backColor))
+        {
+            e.Graphics.FillRectangle(backBrush, e.Bounds);
+        }
+
+        var thumbRect = new Rectangle(e.Bounds.Left + 6, e.Bounds.Top + 6, 44, 44);
+        if (row.ArtworkImage is not null)
+        {
+            e.Graphics.DrawImage(row.ArtworkImage, thumbRect);
+        }
+        else
+        {
+            using (var placeholderBrush = new SolidBrush(selected ? Color.FromArgb(60, SystemColors.ControlDark) : Color.FromArgb(240, 240, 240)))
+            {
+                e.Graphics.FillRectangle(placeholderBrush, thumbRect);
+            }
+
+            using var placeholderFont = new Font("Segoe UI", 7f);
+            TextRenderer.DrawText(e.Graphics, "no art", placeholderFont, thumbRect,
+                selected ? foreColor : SystemColors.GrayText,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
+
+        using (var borderPen = new Pen(Color.FromArgb(210, 210, 210)))
+        {
+            e.Graphics.DrawRectangle(borderPen, thumbRect);
+        }
+
+        var textLeft = thumbRect.Right + 8;
+        var textWidth = Math.Max(10, e.Bounds.Width - textLeft - 14);
+        using (var nameFont = new Font("Segoe UI", 9.5f, FontStyle.Bold))
+        {
+            var title = row.GetCurrent("trackName");
+            TextRenderer.DrawText(e.Graphics,
+                string.IsNullOrEmpty(title) ? "(unknown title)" : title,
+                nameFont, new Rectangle(textLeft, e.Bounds.Top + 3, textWidth, 18), foreColor, TextFormatFlags.EndEllipsis);
+        }
+
+        using (var subFont = new Font("Segoe UI", 8.25f))
+        {
+            var subtitle = string.Join(" - ",
+                new[] { row.GetCurrent("artistName"), row.GetCurrent("collectionName") }
+                    .Where(static s => !string.IsNullOrEmpty(s)));
+            TextRenderer.DrawText(e.Graphics, subtitle, subFont,
+                new Rectangle(textLeft, e.Bounds.Top + 21, textWidth, 16), foreColor, TextFormatFlags.EndEllipsis);
+
+            var statusColor = row.StatusSeverity switch
+            {
+                StatusKind.Success => Color.FromArgb(0, 140, 0),
+                StatusKind.Warning => Color.FromArgb(190, 110, 0),
+                StatusKind.Error => Color.FromArgb(200, 0, 0),
+                _ => selected ? foreColor : SystemColors.GrayText,
+            };
+            TextRenderer.DrawText(e.Graphics, row.StatusMessage, subFont,
+                new Rectangle(textLeft, e.Bounds.Top + 38, textWidth, 16),
+                selected ? foreColor : statusColor, TextFormatFlags.EndEllipsis);
+        }
+
+        if (WillChangeSomething(row))
+        {
+            using var dotBrush = new SolidBrush(Color.OrangeRed);
+            e.Graphics.FillEllipse(dotBrush, e.Bounds.Right - 16, e.Bounds.Top + 9, 9, 9);
+        }
+
+        if ((e.State & DrawItemState.Focus) == DrawItemState.Focus)
+        {
+            e.DrawFocusRectangle();
+        }
+    }
+
+    /// <summary>
+    /// Creates an Image from image bytes. On success the underlying stream
+    /// intentionally stays referenced by the Image (GDI+ requirement).
+    /// </summary>
+    private static Image? ToImage(byte[]? bytes)
+    {
+        if (bytes is null || bytes.Length == 0)
+        {
+            return null;
+        }
+
+        var stream = new MemoryStream(bytes);
+        try
+        {
+            return Image.FromStream(stream);
+        }
+        catch (ArgumentException)
+        {
+            stream.Dispose();
+            return null;
+        }
+    }
+
     private void BuildLayout()
     {
         var root = new TableLayoutPanel
@@ -537,10 +830,10 @@ public sealed class MainForm : Form
             RowCount = 4,
             Padding = new Padding(8),
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 240));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 225));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 110));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
         Controls.Add(root);
 
         root.Controls.Add(BuildTopPanel(), 0, 0);
@@ -645,13 +938,119 @@ public sealed class MainForm : Form
 
     private Control BuildTracksPanel()
     {
-        var group = new GroupBox
+        _splitter = new SplitContainer
         {
-            Text = "Tracks",
             Dock = DockStyle.Fill,
+            Orientation = Orientation.Vertical,
+            SplitterWidth = 6,
+            FixedPanel = FixedPanel.Panel1, // keep the list width when resizing
         };
 
-        _tracksGrid = new DataGridView
+        _trackList = new ListBox
+        {
+            Dock = DockStyle.Fill,
+            DrawMode = DrawMode.OwnerDrawFixed,
+            ItemHeight = 56,
+            IntegralHeight = false,
+            BorderStyle = BorderStyle.FixedSingle,
+        };
+        typeof(ListBox)
+            .GetProperty("DoubleBuffered", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(_trackList, true);
+        _trackList.DrawItem += TrackList_DrawItem;
+        _trackList.SelectedIndexChanged += TrackList_SelectedIndexChanged;
+        _splitter.Panel1.Controls.Add(_trackList);
+
+        var detail = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+        };
+        detail.RowStyles.Add(new RowStyle(SizeType.Absolute, 180));
+        detail.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+        detail.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        _statusLabel = new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            Padding = new Padding(4, 0, 0, 0),
+        };
+
+        detail.Controls.Add(BuildArtworkComparePanel(), 0, 0);
+        detail.Controls.Add(_statusLabel, 0, 1);
+        detail.Controls.Add(BuildCompareGrid(), 0, 2);
+
+        _splitter.Panel2.Controls.Add(detail);
+
+        return _splitter;
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        // SplitterDistance is only reliable once the form has final layout
+        // (setting it in the constructor silently failed)
+        base.OnShown(e);
+        try
+        {
+            _splitter.SplitterDistance = 340;
+        }
+        catch (InvalidOperationException)
+        {
+            // keep the default split; user can drag
+        }
+    }
+
+    private Control BuildArtworkComparePanel()
+    {
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+
+        var currentGroup = new GroupBox
+        {
+            Text = "Current artwork",
+            Dock = DockStyle.Fill,
+        };
+        _artworkCurrentPic = new PictureBox
+        {
+            Dock = DockStyle.Fill,
+            SizeMode = PictureBoxSizeMode.Zoom,
+        };
+        currentGroup.Controls.Add(_artworkCurrentPic);
+
+        var newGroup = new GroupBox
+        {
+            Text = "New (from Apple)",
+            Dock = DockStyle.Fill,
+        };
+        _artworkNewPic = new PictureBox
+        {
+            Dock = DockStyle.Fill,
+            SizeMode = PictureBoxSizeMode.Zoom,
+        };
+        newGroup.Controls.Add(_artworkNewPic);
+
+        panel.Controls.Add(currentGroup, 0, 0);
+        panel.Controls.Add(newGroup, 1, 0);
+        return panel;
+    }
+
+    private Control BuildCompareGrid()
+    {
+        var group = new GroupBox
+        {
+            Text = "Tag comparison (current vs from Apple)",
+            Dock = DockStyle.Fill,
+        };
+        _detailGrid = new DataGridView
         {
             Dock = DockStyle.Fill,
             AutoGenerateColumns = false,
@@ -659,28 +1058,31 @@ public sealed class MainForm : Form
             AllowUserToDeleteRows = false,
             AllowUserToResizeRows = false,
             ReadOnly = true,
+            RowHeadersVisible = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.AllCells,
             BackgroundColor = SystemColors.Window,
         };
-        foreach (var field in TrackFields.All)
+        _detailGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
-            _tracksGrid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = field.LookupMember,
-                HeaderText = field.DisplayName,
-                DataPropertyName = TrackRow.PropertyByLookupMember[field.LookupMember],
-            });
-        }
-
-        _tracksGrid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "TrackId",
-            HeaderText = "Track ID",
-            DataPropertyName = nameof(TrackRow.TrackId),
+            Name = "Field",
+            HeaderText = "Field",
+            Width = 120,
         });
-
-        group.Controls.Add(_tracksGrid);
+        _detailGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Current",
+            HeaderText = "Current",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            FillWeight = 50,
+        });
+        _detailGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Proposed",
+            HeaderText = "From Apple",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            FillWeight = 50,
+        });
+        group.Controls.Add(_detailGrid);
         return group;
     }
 
@@ -794,6 +1196,12 @@ public sealed class MainForm : Form
         if (_busy)
         {
             _cancellation?.Cancel();
+        }
+
+        foreach (var row in _rows)
+        {
+            row.PropertyChanged -= OnRowChanged;
+            row.DisposeImages();
         }
 
         _search.Dispose();

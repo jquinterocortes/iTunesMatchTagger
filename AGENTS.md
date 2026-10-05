@@ -55,10 +55,16 @@ Instructions for AI coding agents working in this repository.
   API JSON, iTunes COM, TagLib# Tag). Add new taggable fields there - never
   with string-based reflection.
 - Album artwork is a `TrackField` whose value is the Search API's
-  `artworkUrl100` URL; the update loop downloads it (rewritten to
-  600x600bb) and writes it via `ITaggableTrack.WriteArtwork` —
-  `AddArtworkFromFile` on COM (replacing existing artworks) or
-  `Tag.Pictures` on TagLib#.
+  `artworkUrl100` URL; the update loop downloads it (rewritten via
+  `SizedArtworkUrl` to 600x600bb) and writes it via
+  `ITaggableTrack.WriteArtwork` — `AddArtworkFromFile` on COM (replacing
+  existing artworks) or `Tag.Pictures` on TagLib#. Lookup also downloads
+  a 300px preview for the UI.
+- UI is a master-detail validator: owner-drawn track list (thumbnail,
+  status, orange dot when a write would change values) + detail panel with
+  current-vs-Apple artwork (current read from the file via
+  `ArtworkReader`, no COM picture marshaling) and a field comparison
+  table with differences highlighted.
 - UI-thread discipline: COM access and `TrackRow` mutations happen only on
   the UI thread; background lookups report through `IProgress<T>`. Do not
   raise `TrackRow.PropertyChanged` from worker threads (DataGridView is

@@ -52,18 +52,18 @@ public sealed class ITunesSearchClient : IDisposable
 
     /// <summary>
     /// Downloads album artwork bytes. Apple artwork URLs end with a size
-    /// segment like 100x100bb.jpg; it is rewritten to request 600x600.
+    /// segment like 100x100bb.jpg; it is rewritten to the requested size.
     /// </summary>
-    public async Task<byte[]> DownloadArtworkAsync(string artworkUrl, CancellationToken cancellationToken = default)
+    public async Task<byte[]> DownloadArtworkAsync(string artworkUrl, int size = 600, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(artworkUrl);
-        return await _httpClient.GetByteArrayAsync(HighResArtworkUrl(artworkUrl), cancellationToken).ConfigureAwait(false);
+        return await _httpClient.GetByteArrayAsync(SizedArtworkUrl(artworkUrl, size), cancellationToken).ConfigureAwait(false);
     }
 
     private static readonly Regex SizeSegmentRegex = new(@"^\d+x\d+bb\.(jpg|jpeg|png|webp)$", RegexOptions.Compiled);
 
-    /// <summary>Rewrites the artwork URL's size segment to 600x600. Parsing core, exposed for tests.</summary>
-    public static string HighResArtworkUrl(string artworkUrl)
+    /// <summary>Rewrites the artwork URL's size segment (e.g. 100x100bb.jpg -> 600x600bb.jpg). Parsing core, exposed for tests.</summary>
+    public static string SizedArtworkUrl(string artworkUrl, int size)
     {
         var lastSlash = artworkUrl.LastIndexOf('/');
         if (lastSlash >= 0)
@@ -71,7 +71,7 @@ public sealed class ITunesSearchClient : IDisposable
             var lastSegment = artworkUrl[(lastSlash + 1)..];
             if (SizeSegmentRegex.IsMatch(lastSegment))
             {
-                return artworkUrl[..(lastSlash + 1)] + "600x600bb.jpg";
+                return artworkUrl[..(lastSlash + 1)] + $"{size}x{size}bb.jpg";
             }
         }
 

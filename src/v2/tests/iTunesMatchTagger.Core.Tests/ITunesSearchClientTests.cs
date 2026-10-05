@@ -164,32 +164,26 @@ public class ITunesSearchClientTests
     }
 
     [Theory]
-    [InlineData("https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/ab/cd/ef/source/100x100bb.jpg", "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/ab/cd/ef/source/600x600bb.jpg")]
-    [InlineData("https://is1-ssl.mzstatic.com/image/thumb/Music/xyz/source/100x100bb.png", "https://is1-ssl.mzstatic.com/image/thumb/Music/xyz/source/600x600bb.jpg")]
-    [InlineData("https://example.com/some/art.jpg", "https://example.com/some/art.jpg")]
-    public void HighResArtworkUrl_RewritesTheSizeSegment(string artworkUrl, string expected)
+    [InlineData("https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/ab/cd/ef/source/100x100bb.jpg", 600, "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/ab/cd/ef/source/600x600bb.jpg")]
+    [InlineData("https://is1-ssl.mzstatic.com/image/thumb/Music/xyz/source/100x100bb.png", 300, "https://is1-ssl.mzstatic.com/image/thumb/Music/xyz/source/300x300bb.jpg")]
+    [InlineData("https://example.com/some/art.jpg", 600, "https://example.com/some/art.jpg")]
+    public void SizedArtworkUrl_RewritesTheSizeSegment(string artworkUrl, int size, string expected)
     {
-        Assert.Equal(expected, ITunesSearchClient.HighResArtworkUrl(artworkUrl));
+        Assert.Equal(expected, ITunesSearchClient.SizedArtworkUrl(artworkUrl, size));
     }
 
     [Fact]
-    public async Task DownloadArtworkAsync_RequestsHighResUrl()
+    public async Task DownloadArtworkAsync_RequestsTheRequestedSize()
     {
-        byte[]? downloaded = null;
-        var handler = new FakeHandler(request =>
+        var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            downloaded = [0xFF, 0xD8, 0xFF]; // JPEG magic bytes
-            Assert.NotNull(request.RequestUri);
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent(downloaded),
-            };
+            Content = new ByteArrayContent([0xFF, 0xD8, 0xFF]), // JPEG magic bytes
         });
         using var client = new ITunesSearchClient(new HttpClient(handler));
 
-        var bytes = await client.DownloadArtworkAsync("https://is1-ssl.mzstatic.com/image/thumb/Music/a/source/100x100bb.jpg");
+        var bytes = await client.DownloadArtworkAsync("https://is1-ssl.mzstatic.com/image/thumb/Music/a/source/100x100bb.jpg", 300);
 
         Assert.Equal([0xFF, 0xD8, 0xFF], bytes);
-        Assert.Equal("https://is1-ssl.mzstatic.com/image/thumb/Music/a/source/600x600bb.jpg", handler.LastRequest?.RequestUri?.ToString());
+        Assert.Equal("https://is1-ssl.mzstatic.com/image/thumb/Music/a/source/300x300bb.jpg", handler.LastRequest?.RequestUri?.ToString());
     }
 }
