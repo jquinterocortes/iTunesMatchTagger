@@ -74,6 +74,13 @@ Instructions for AI coding agents working in this repository.
   artwork (current read from the file via `ArtworkReader`, no COM
   picture marshaling), a comparison table with a per-row "Use" checkbox
   (per-track field mask) and differences highlighted.
+- The bottom bar has a **"5. Re-scan (force match)"** action (COM mode): it
+  removes the selected tracks from the iTunes library (files stay on disk)
+  and re-adds the same files via `LibraryPlaylist.AddFile`, so Apple's match
+  engine re-evaluates uploaded tracks. There is no COM API to force a direct
+  match; expect playlist re-assignment to be needed for playlists that held
+  those tracks. `TrackRow.ReplaceTrack` swaps the backing track and clears
+  all lookup state.
 - UI-thread discipline: COM access and `TrackRow` mutations happen only on
   the UI thread; background lookups report through `IProgress<T>`. Do not
   raise `TrackRow.PropertyChanged` from worker threads (DataGridView is

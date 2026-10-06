@@ -45,6 +45,26 @@ public sealed class ITunesComClient : IDisposable
         return tracks;
     }
 
+    /// <summary>
+    /// Removes a track from the iTunes library. The file on disk is NOT
+    /// deleted, which is what the re-scan flow relies on.
+    /// </summary>
+    public void RemoveFromLibrary(ComTrack track) => track.Raw.Delete();
+
+    /// <summary>
+    /// Re-imports an audio file into the main library (the delete + re-add
+    /// trick that makes Apple's match engine re-evaluate an uploaded track).
+    /// Returns the freshly added library track, or null when iTunes added
+    /// nothing (already present, filter rejected the kind, ...).
+    /// </summary>
+    public ComTrack? AddFileToLibrary(string path)
+    {
+        dynamic operation = Application.LibraryPlaylist.AddFile(path);
+        dynamic tracks = operation.Tracks;
+        int count = (int)tracks.Count;
+        return count == 0 ? null : new ComTrack(tracks[1]); // 1-based
+    }
+
     public void Dispose()
     {
         if (_application is not null)

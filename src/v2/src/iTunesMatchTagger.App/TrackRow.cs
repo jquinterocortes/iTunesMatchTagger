@@ -48,7 +48,7 @@ public sealed class TrackRow : INotifyPropertyChanged
         }
     }
 
-    public ITaggableTrack Track { get; }
+    public ITaggableTrack Track { get; private set; }
 
     /// <summary>True when the last lookup produced a result for this track.</summary>
     public bool LookupSuccess { get; set; }
@@ -222,6 +222,35 @@ public sealed class TrackRow : INotifyPropertyChanged
         {
             Raise();
         }
+    }
+
+    /// <summary>
+    /// Swaps the backing track after an iTunes library "delete + re-add"
+    /// (force re-scan): re-reads current values and forgets everything the
+    /// previous lookup had proposed. Must run on the UI thread.
+    /// </summary>
+    public void ReplaceTrack(ITaggableTrack track)
+    {
+        foreach (var image in _candidateArtwork.Values)
+        {
+            image?.Dispose();
+        }
+
+        _candidateArtwork.Clear();
+        _sourcePick.Clear();
+        _candidates = [];
+        _activeCandidateIndex = -1;
+        _proposed.Clear();
+        LookupSuccess = false;
+        SetCurrentArtworkImage(null);
+        Track = track;
+        _current.Clear();
+        foreach (var field in TrackFields.All)
+        {
+            _current[field.LookupMember] = track.ReadField(field)?.ToString();
+        }
+
+        Raise();
     }
 
     public void SetStatus(string message, StatusKind severity)

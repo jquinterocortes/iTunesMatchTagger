@@ -63,6 +63,8 @@ resolved from the registry.
 - [x] Additional tag sources: MusicBrainz, Discogs and Deezer adapters with a
       normalized `TagCandidate`; automatic fallback (Apple first), candidate
       picker and per-field "Use" checkboxes in the detail panel
+- [x] Force re-scan: delete + re-add tracks from the library (files kept) so
+      Apple's match engine re-evaluates uploaded tracks
 - [ ] Candidate quality: MusicBrainz track/disc numbers (needs release lookup), genre via `/recording/{mbid}`
 - [ ] CI workflow (build + test on windows-latest)
 - [ ] Release packaging (self-contained single-file exe)

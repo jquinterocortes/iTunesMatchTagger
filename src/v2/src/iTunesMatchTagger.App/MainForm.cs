@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using Microsoft.CSharp.RuntimeBinder;
 using iTunesMatchTagger.Core.Fields;
 using iTunesMatchTagger.Core.ITunes;
 using iTunesMatchTagger.Core.Lookup;
@@ -70,6 +71,7 @@ public sealed class MainForm : Form
     private Button _btnLookup = new();
     private Button _btnUpdate = new();
     private Button _btnLoadFolder = new();
+    private Button _btnRescan = new();
     private Button _btnInfo = new();
 
     public MainForm()
@@ -741,12 +743,128 @@ public sealed class MainForm : Form
         return !_busy;
     }
 
+    // ------------------------------------------------------------------
+    // 5. Force re-scan: delete from the library + re-add the file so
+    //    Apple's match engine re-evaluates the track (no COM API exists
+    //    for that; this is the one supported trick).
+    // ------------------------------------------------------------------
+
+    private void BtnRescan_Click(object? sender, EventArgs e)
+    {
+        if (!EnsureNotBusy())
+        {
+            return;
+        }
+
+        var rescannable = _rows.Where(static r => r.Track is ComTrack { Location: not null }).ToList();
+        if (rescannable.Count == 0)
+        {
+            Log("No local iTunes tracks among the loaded rows (standalone file rows have no library entry to re-scan).", LogSeverity.Error);
+            MessageBox.Show(this,
+                "Re-scan only works on tracks obtained from iTunes (mode \"1. Get selected tracks\") whose file exists locally.",
+                Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var confirmed = MessageBox.Show(this,
+            $"Re-scan {rescannable.Count} track(s)?\n\n" +
+            "This removes them from the iTunes library (the files stay on disk) and re-adds them, so Apple's match engine evaluates them again.\n\n" +
+            "Playlist membership outside the library may need to be re-assigned manually.",
+            Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+        if (confirmed != DialogResult.Yes)
+        {
+            return;
+        }
+
+        SetBusy(true);
+        _progress.Value = 0;
+        _progress.Maximum = rescannable.Count;
+        Log($"Re-scan started: {rescannable.Count} track(s). Files stay on disk.");
+
+        try
+        {
+            foreach (var row in rescannable)
+            {
+                _progress.PerformStep();
+                var path = row.File;
+                var oldTrack = (ComTrack)row.Track;
+
+                try
+                {
+                    _itunes.RemoveFromLibrary(oldTrack);
+                    LogDebug($"Removed from library: {path}");
+
+                    var reAdded = _itunes.AddFileToLibrary(path);
+                    if (reAdded is null)
+                    {
+                        row.SetStatus("Re-scan failed: iTunes did not re-add the file", StatusKind.Error);
+                        Log($"Re-scan: iTunes did not re-add '{path}'", LogSeverity.Error);
+                        continue;
+                    }
+
+                    row.ReplaceTrack(reAdded);
+
+                    var kind = DescribeKind(reAdded);
+                    if (reAdded.TrackId > 0)
+                    {
+                        row.SetStatus($"Re-scanned: now '{kind}' (catalog ID {reAdded.TrackId})", StatusKind.Success);
+                        Log($"Re-scanned: '{kind}' with catalog ID {reAdded.TrackId}: {path}");
+                    }
+                    else
+                    {
+                        row.SetStatus($"Re-scanned: Apple is evaluating ({kind}) - check again in a few minutes", StatusKind.Warning);
+                        Log($"Re-scanned: still '{kind}', Apple is evaluating: {path}", LogSeverity.Warning);
+                    }
+                }
+                catch (Exception ex) when (ex is COMException or RuntimeBinderException or TargetInvocationException)
+                {
+                    row.SetStatus($"Re-scan COM error: {ex.Message}", StatusKind.Error);
+                    Log($"Re-scan failed for '{path}': {ex.Message}", LogSeverity.Error);
+                }
+            }
+
+            Log("Re-scan complete. Match status may keep changing while iTunes syncs.");
+        }
+        catch (Exception ex)
+        {
+            Log($"Re-scan failed: {ex.Message}", LogSeverity.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+            InvalidateSelection();
+        }
+    }
+
+    private static string DescribeKind(ComTrack track)
+    {
+        try
+        {
+            return (string)track.Raw.KindAsString;
+        }
+        catch (Exception ex) when (ex is COMException or RuntimeBinderException or TargetInvocationException)
+        {
+            return "unknown kind";
+        }
+    }
+
+    /// <summary>Repaints the list and the detail panel for the currently selected row.</summary>
+    private void InvalidateSelection()
+    {
+        _trackList.Invalidate();
+        var row = SelectedRow();
+        if (row is not null)
+        {
+            FillDetail(row);
+        }
+    }
+
     private void SetBusy(bool busy)
     {
         _busy = busy;
         UseWaitCursor = busy;
         _btnGet.Enabled = _btnLoadFolder.Enabled = !busy;
-        _btnLookup.Enabled = _btnUpdate.Enabled = !busy;
+        _btnLookup.Enabled = _btnUpdate.Enabled = _btnRescan.Enabled = !busy;
     }
 
     private void Log(string message, LogSeverity severity = LogSeverity.Information) => _logSink.Report(new LogEntry(message, severity));
@@ -1653,6 +1771,13 @@ public sealed class MainForm : Form
         _btnUpdate.Click += BtnUpdate_Click;
         _btnLoadFolder = new Button { Text = "Load folder...", AutoSize = true, Margin = buttonMargin };
         _btnLoadFolder.Click += BtnLoadFolder_Click;
+        _btnRescan = new Button
+        {
+            Text = "5. Re-scan (force match)",
+            AutoSize = true,
+            Margin = buttonMargin,
+        };
+        _btnRescan.Click += BtnRescan_Click;
         _btnInfo = new Button { Text = "Info", AutoSize = true, Margin = buttonMargin };
         _btnInfo.Click += BtnInfo_Click;
         _showDebug = new CheckBox { Text = "Show debug", AutoSize = true, Margin = new Padding(12, 12, 0, 0) };
@@ -1662,6 +1787,7 @@ public sealed class MainForm : Form
         bar.Controls.Add(_btnLookup);
         bar.Controls.Add(_btnUpdate);
         bar.Controls.Add(_btnLoadFolder);
+        bar.Controls.Add(_btnRescan);
         bar.Controls.Add(_btnInfo);
         bar.Controls.Add(_showDebug);
         return bar;
