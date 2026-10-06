@@ -144,10 +144,23 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void Log(string message, StatusKind severity = StatusKind.Neutral)
     {
-        _logLines.Add(new LogLineViewModel(message, severity));
-        if (severity is StatusKind.Success or StatusKind.Warning or StatusKind.Error or StatusKind.Neutral)
+        var line = new LogLineViewModel(message, severity);
+
+        void Add()
         {
+            _logLines.Add(line);
             StatusText = message;
+        }
+
+        // the lookup service logs from worker threads (ConfigureAwait(false))
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            dispatcher.Invoke(Add);
+        }
+        else
+        {
+            Add();
         }
     }
 
