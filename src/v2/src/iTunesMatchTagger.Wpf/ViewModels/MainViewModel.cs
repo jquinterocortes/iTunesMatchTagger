@@ -158,6 +158,48 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private int _lyricsFetchId;
 
+    private readonly SemaphoreSlim _lyricsFetchLock = new(1, 1);
+
+    /// <summary>Runs the per-track lyrics fetch serialized (LRCLib rate friendly) during the lookup.</summary>
+    private async Task FetchLyricsInBackgroundAsync(TrackRowViewModel row)
+    {
+        await _lyricsFetchLock.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            await row.FetchLyricsAsync(_lyrics, CancellationToken.None).ConfigureAwait(true);
+            if (ReferenceEquals(SelectedRow, row))
+            {
+                UpdateLyricsPanelFromRow();
+            }
+        }
+        finally
+        {
+            _lyricsFetchLock.Release();
+        }
+    }
+
+    private string ComposeLyricsStatus(TrackRowViewModel? row)
+    {
+        if (row is null)
+        {
+            return string.Empty;
+        }
+
+        var file = row.CurrentLyrics is { Length: > 0 } current
+            ? $"File: has lyrics ({current.Length} chars)"
+            : "File: no lyrics";
+
+        return row.LyricsInfo is null ? file : $"{file} · {row.LyricsInfo}";
+    }
+
+    /// <summary>Shows the row's cached lyrics without hitting the network again.</summary>
+    private void UpdateLyricsPanelFromRow()
+    {
+        var row = SelectedRow;
+        LyricsPreview = row?.LyricsText ?? string.Empty;
+        LyricsStatus = ComposeLyricsStatus(row);
+    }
+
     /// <summary>
     /// Fetches (without writing) the LRCLib lyrics for the selected track so
     /// the user can preview what "Update" would write.
@@ -165,8 +207,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public async Task RefreshLyricsPreviewAsync()
     {
         var row = SelectedRow;
-        var fetchId = ++_lyricsFetchId;
-
         if (row is null)
         {
             LyricsPreview = string.Empty;
@@ -174,53 +214,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        // an empty candidate value ("") must not shadow the current tag
-        var title = FirstNonEmpty(row.GetProposed("trackName"), row.GetCurrent("trackName"));
-        var artist = FirstNonEmpty(row.GetProposed("artistName"), row.GetCurrent("artistName"));
-        var album = FirstNonEmpty(row.GetProposed("collectionName"), row.GetCurrent("collectionName"));
-        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))
+        if (row.LyricsFetched)
         {
-            LyricsPreview = string.Empty;
-            LyricsStatus = "No tags to search lyrics for.";
+            UpdateLyricsPanelFromRow();
             return;
         }
 
-        LyricsStatus = "Searching on LRCLib…";
-        try
-        {
-            var lyrics = await _lyrics.LookupAsync(artist, title, album, row.Track.DurationMs, CancellationToken.None).ConfigureAwait(true);
-            if (fetchId != _lyricsFetchId)
-            {
-                return; // the user moved on to another track meanwhile
-            }
-
-            if (lyrics is null)
-            {
-                LyricsPreview = string.Empty;
-                LyricsStatus = "No lyrics found on LRCLib.";
-            }
-            else if (lyrics.IsEmpty)
-            {
-                LyricsPreview = string.Empty;
-                LyricsStatus = "Instrumental track (nothing to write).";
-            }
-            else
-            {
-                LyricsPreview = lyrics.Best!;
-                var lineCount = lyrics.Best!.Count(static l => l == '\n') + 1;
-                LyricsStatus = lyrics.Synced is null
-                    ? $"Plain text, {lineCount} line(s) (LRCLib #{lyrics.TrackId})"
-                    : $"Synced LRC, {lineCount} line(s) (LRCLib #{lyrics.TrackId})";
-            }
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            if (fetchId == _lyricsFetchId)
-            {
-                LyricsPreview = string.Empty;
-                LyricsStatus = $"LRCLib lookup failed: {ex.Message}";
-            }
-        }
+        LyricsStatus = ComposeLyricsStatus(row);
+        LyricsPreview = string.Empty;
+        await FetchLyricsInBackgroundAsync(row).ConfigureAwait(true);
     }
 
     public int ProgressValue { get; private set; }
@@ -351,7 +353,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         Rows.Clear();
         foreach (var track in tracks)
         {
-            var row = new TrackRowViewModel(track);
+            var row = new TrackRowViewModel(track)
+            {
+                LyricsWriteEnabled = _settings.IncludeLyrics,
+            };
             row.PropertyChanged += OnRowChanged;
             Rows.Add(row);
         }
@@ -439,6 +444,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
                 ApplyLookupOutcome(row, outcome);
                 SetProgress(ProgressValue + 1, ProgressMaximum);
+                _ = FetchLyricsInBackgroundAsync(row); // cache the lyrics once, serialized
             }
         }
         catch (Exception ex)
@@ -620,11 +626,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 }
 
                 var lyricsWritten = false;
-                if (_settings.IncludeLyrics)
+                if (row.LyricsWriteEnabled)
                 {
                     try
                     {
-                        lyricsWritten = await WriteLyricsIfNeededAsync(row).ConfigureAwait(true);
+                        if (!row.LyricsFetched)
+                        {
+                            await FetchLyricsInBackgroundAsync(row).ConfigureAwait(true);
+                        }
+
+                        lyricsWritten = await row.WriteCachedLyricsAsync().ConfigureAwait(true);
                         if (lyricsWritten)
                         {
                             lyricsWrittenCount++;
@@ -676,38 +687,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
     /// Looks up lyrics on LRCLib using the proposed (or current) tags and
     /// writes them with synced LRC preferred over plain text.
     /// </summary>
-    private async Task<bool> WriteLyricsIfNeededAsync(TrackRowViewModel row)
-    {
-        // an empty candidate value ("") must not shadow the current tag
-        var title = FirstNonEmpty(row.GetProposed("trackName"), row.GetCurrent("trackName"));
-        var artist = FirstNonEmpty(row.GetProposed("artistName"), row.GetCurrent("artistName"));
-        var album = FirstNonEmpty(row.GetProposed("collectionName"), row.GetCurrent("collectionName"));
-        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))
-        {
-            Log($"No tags to look up lyrics for: {row.File}", StatusKind.Warning);
-            return false;
-        }
-
-        var lyrics = await _lyrics.LookupAsync(artist, title, album, row.Track.DurationMs, CancellationToken.None).ConfigureAwait(true);
-        if (lyrics is null)
-        {
-            Log($"No lyrics found on LRCLib: {row.File}", StatusKind.Warning);
-            return false;
-        }
-
-        if (lyrics.IsEmpty)
-        {
-            Log($"Instrumental track, nothing to write: {row.File}");
-            return false;
-        }
-
-        var text = lyrics.Best!;
-        await Task.Run(() => row.Track.WriteLyrics(text)).ConfigureAwait(true);
-        var lineCount = text.Count(static l => l == '\n') + 1;
-        Log($"Lyrics ({(lyrics.Synced is null ? "plain" : "synced LRC")}, {lineCount} lines) -> {row.File}");
-        return true;
-    }
-
     private static string? FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(static v => !string.IsNullOrWhiteSpace(v));
 
@@ -724,6 +703,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
             snapshot.ApplyTo(_settings);
             _settings.Save();
             LoadOptionsFromSettings();
+            foreach (var row in Rows)
+            {
+                row.LyricsWriteEnabled = _settings.IncludeLyrics;
+            }
+
             Log("Settings saved.");
         }
     }

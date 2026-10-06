@@ -43,6 +43,20 @@ public sealed class FileTrack : ITaggableTrack
         file.Save();
     }
 
+    public string? ReadLyrics()
+    {
+        try
+        {
+            using var file = TagLib.File.Create(Location);
+            var lyrics = file.Tag.Lyrics;
+            return string.IsNullOrWhiteSpace(lyrics) ? null : lyrics;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     public object? ReadField(TrackField field)
     {
         if (field.GetFromFileTag is null)

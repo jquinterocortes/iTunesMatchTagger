@@ -63,6 +63,19 @@ public sealed class ComTrack : ITaggableTrack
 
     public void WriteLyrics(string lyrics) => Raw.Lyrics = lyrics;
 
+    public string? ReadLyrics()
+    {
+        try
+        {
+            var lyrics = (string?)Raw.Lyrics;
+            return string.IsNullOrWhiteSpace(lyrics) ? null : lyrics;
+        }
+        catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+        {
+            return null; // e.g. iCloud-only tracks
+        }
+    }
+
     private static int? ParsePackedTime(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))

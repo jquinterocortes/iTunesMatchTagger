@@ -48,6 +48,15 @@
         </TextBlock>
       </Grid>
     </DataTemplate>
+    <!-- hides the Use checkbox on display-only rows (Artwork Preview) -->
+    <Style x:Key="UseCellCheckBoxStyle" TargetType="CheckBox">
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding IsPreview}" Value="True">
+          <Setter Property="Visibility" Value="Hidden" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
   </Window.Resources>
 
   <Grid>
@@ -170,7 +179,8 @@
                     DataContext="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=DataContext}"
                     ItemsSource="{Binding DetailRows, Mode=OneWay}">
           <DataGrid.Columns>
-            <DataGridCheckBoxColumn Header="Use" Binding="{Binding Use, UpdateSourceTrigger=PropertyChanged}" Width="44" />
+            <DataGridCheckBoxColumn Header="Use" Binding="{Binding Use, UpdateSourceTrigger=PropertyChanged}" Width="44"
+                                     ElementStyle="{StaticResource UseCellCheckBoxStyle}" />
             <DataGridTextColumn Header="Field" Binding="{Binding FieldName, Mode=OneWay}" Width="120" IsReadOnly="True" />
             <DataGridTemplateColumn Header="Current" Width="*">
               <DataGridTemplateColumn.CellTemplate>
@@ -216,6 +226,9 @@
             <DockPanel>
               <Button DockPanel.Dock="Right" Style="{StaticResource IconOnlyButton}" Content="&#x21bb;"
                       Click="RefreshLyrics_Click" ToolTip="Search the lyrics again on LRCLib" />
+              <CheckBox DockPanel.Dock="Right" Margin="0,0,8,0" VerticalAlignment="Center"
+                        Content="Write on update" ToolTip="Write these lyrics to the file during the Update step (per track)"
+                        IsChecked="{Binding SelectedRow.LyricsWriteEnabled}" />
               <TextBlock Text="Lyrics preview" Foreground="{DynamicResource Subtle}" FontWeight="SemiBold" FontSize="12" />
               <TextBlock Margin="10,0,0,0" VerticalAlignment="Center" FontSize="11.5"
                          Foreground="{DynamicResource Subtle}" Text="{Binding LyricsStatus, Mode=OneWay}" />

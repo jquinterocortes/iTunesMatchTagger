@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO;
+using System.Net.Http;
 using System.Windows.Media.Imaging;
 using iTunesMatchTagger.Core.Fields;
 using iTunesMatchTagger.Core.Sources;
@@ -39,6 +40,7 @@ public sealed class TrackRowViewModel : INotifyPropertyChanged
             _enabledFields.Add(field.LookupMember);
         }
 
+        CurrentLyrics = track.ReadLyrics();
         RefreshThumbnailActions();
     }
 
@@ -328,6 +330,110 @@ public sealed class TrackRowViewModel : INotifyPropertyChanged
 
         Raise();
     }
+
+    // ------------------------------------------------------------------
+    // Lyrics (fetched once per track, at lookup time or on demand)
+    // ------------------------------------------------------------------
+
+    /// <summary>Lyrics text already embedded in the file/tag (or null).</summary>
+    public string? CurrentLyrics { get; private set; }
+
+    /// <summary>Cached LRCLib result (null = not fetched yet).</summary>
+    public string? LyricsText => _lyricsText;
+
+    /// <summary>What the last fetch found: line counts, source id, or miss/instrumental.</summary>
+    public string? LyricsInfo => _lyricsInfo;
+
+    public bool LyricsFetched => _lyricsFetched;
+
+    private bool _lyricsFetched;
+    private string? _lyricsText;
+    private string? _lyricsInfo;
+
+    private bool _lyricsWriteEnabled;
+
+    /// <summary>Per-track decision: write the LRCLib lyrics during "Update".</summary>
+    public bool LyricsWriteEnabled
+    {
+        get => _lyricsWriteEnabled;
+        set
+        {
+            if (_lyricsWriteEnabled != value)
+            {
+                _lyricsWriteEnabled = value;
+                Raise();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fetches the LRCLib lyrics once per track (without writing). Callers
+    /// serialize this behind a lock so the whole run stays rate friendly.
+    /// </summary>
+    public async Task FetchLyricsAsync(LyricsClient lyricsClient, CancellationToken cancellationToken)
+    {
+        if (_lyricsFetched)
+        {
+            return;
+        }
+
+        _lyricsFetched = true;
+        Raise();
+
+        try
+        {
+            var title = FirstNonEmpty(GetProposed("trackName"), GetCurrent("trackName"));
+            var artist = FirstNonEmpty(GetProposed("artistName"), GetCurrent("artistName"));
+            var album = FirstNonEmpty(GetProposed("collectionName"), GetCurrent("collectionName"));
+            if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))
+            {
+                _lyricsInfo = "No tags to search lyrics for.";
+                return;
+            }
+
+            var lyrics = await lyricsClient.LookupAsync(artist, title, album, Track.DurationMs, cancellationToken).ConfigureAwait(false);
+            if (lyrics is null)
+            {
+                _lyricsInfo = "No lyrics found on LRCLib.";
+                return;
+            }
+
+            if (lyrics.IsEmpty)
+            {
+                _lyricsInfo = "Instrumental track (nothing to write).";
+                return;
+            }
+
+            _lyricsText = lyrics.Best!;
+            var lineCount = _lyricsText.Count(static l => l == '\n') + 1;
+            _lyricsInfo = (lyrics.Synced is null ? "Plain text" : "Synced LRC") + $", {lineCount} line(s) (LRCLib #{lyrics.TrackId})";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _lyricsInfo = $"LRCLib lookup failed: {ex.Message}";
+            _lyricsFetched = false; // allow a retry via the refresh button
+        }
+        finally
+        {
+            Raise();
+        }
+    }
+
+    /// <summary>Writes the cached LRCLib lyrics (no-op when nothing was found). Returns true when written.</summary>
+    public async Task<bool> WriteCachedLyricsAsync()
+    {
+        if (_lyricsText is not { Length: > 0 } text)
+        {
+            return false;
+        }
+
+        await Task.Run(() => Track.WriteLyrics(text)).ConfigureAwait(true);
+        CurrentLyrics = text;
+        return true;
+    }
+
+    private static string? FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(static v => !string.IsNullOrWhiteSpace(v));
 
     // ------------------------------------------------------------------
     // Per-row field mask (which fields the update step may write)

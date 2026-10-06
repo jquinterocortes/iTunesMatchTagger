@@ -41,4 +41,7 @@ public interface ITaggableTrack
 
     /// <summary>Replaces the lyrics tag (plain text or synced LRC text).</summary>
     void WriteLyrics(string lyrics);
+
+    /// <summary>Current lyrics text stored in the tag, or null when there is none (or unreadable).</summary>
+    string? ReadLyrics() => null;
 }
