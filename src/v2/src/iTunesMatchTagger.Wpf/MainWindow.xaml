@@ -27,20 +27,28 @@
       </Ellipse>
     </DataTemplate>
 
-    <!-- cell template used by the per-source comparison columns -->
+    <!-- cell template used by the Current + per-source comparison columns -->
     <DataTemplate x:Key="SourceCellTemplate">
-      <TextBlock Text="{Binding Text, Mode=OneWay}">
-        <TextBlock.Style>
-          <Style TargetType="TextBlock" BasedOn="{StaticResource FieldText}">
-            <Style.Triggers>
-              <DataTrigger Binding="{Binding IsDifferent}" Value="True">
-                <Setter Property="Foreground" Value="{DynamicResource Accent}" />
-                <Setter Property="FontWeight" Value="SemiBold" />
-              </DataTrigger>
-            </Style.Triggers>
-          </Style>
-        </TextBlock.Style>
-      </TextBlock>
+      <Grid>
+        <Image Height="96" Stretch="Uniform" HorizontalAlignment="Left" Margin="1"
+               Source="{Binding Image, Mode=OneWay}"
+               Visibility="{Binding Image, Converter={StaticResource NullToCollapsed}}" />
+        <TextBlock Text="{Binding Text, Mode=OneWay}">
+          <TextBlock.Style>
+            <Style TargetType="TextBlock" BasedOn="{StaticResource FieldText}">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding IsDifferent}" Value="True">
+                  <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+                  <Setter Property="FontWeight" Value="SemiBold" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Image, Converter={StaticResource NullToVisible}}" Value="True">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </TextBlock.Style>
+        </TextBlock>
+      </Grid>
     </DataTemplate>
   </Window.Resources>
 
@@ -138,19 +146,21 @@
       <!--Detail-->
       <Grid Grid.Column="2" Margin="8,8,12,8">
         <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />  <!-- candidate picker -->
-          <RowDefinition Height="*"    />  <!-- comparison grid -->
-          <RowDefinition Height="Auto" />  <!-- artwork strip -->
+          <RowDefinition Height="Auto" />  <!-- write-from picker -->
+          <RowDefinition Height="*"    />  <!-- comparison grid (artwork is a row inside it) -->
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0" Margin="0,0,0,8">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
-          <TextBlock Text="Result:" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource Subtle}" />
-          <ComboBox Grid.Column="1" x:Name="CandidatePicker"
-                    DisplayMemberPath="DisplayName" SelectionChanged="CandidatePicker_SelectionChanged" />
+          <TextBlock Text="Write from:" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource Subtle}" />
+          <ComboBox Grid.Column="1" x:Name="WriteFromPicker" Width="160" Margin="0,0,12,0"
+                    SelectionChanged="WriteFromPicker_SelectionChanged" />
+          <TextBlock Grid.Column="2" VerticalAlignment="Center" Foreground="{DynamicResource Subtle}" FontSize="12"
+                     Text="Pick a candidate per source in the column headers; this chooses which source is written." />
         </Grid>
 
         <DataGrid Grid.Row="1" x:Name="DetailGrid"
@@ -162,7 +172,7 @@
             <DataGridTemplateColumn Header="Current" Width="*">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
-                  <TextBlock Text="{Binding Current, Mode=OneWay}" Style="{StaticResource FieldText}" Foreground="{DynamicResource Subtle}" />
+                  <ContentPresenter Content="{Binding CurrentCell, Mode=OneWay}" ContentTemplate="{StaticResource SourceCellTemplate}" />
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
@@ -196,26 +206,6 @@
             </DataGridTemplateColumn>
           </DataGrid.Columns>
         </DataGrid>
-
-        <!-- Artwork strip: Current + one preview per source -->
-        <ItemsControl Grid.Row="2" x:Name="ArtworkStrip" Margin="0,8,0,0">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <UniformGrid Columns="5" />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <StackPanel Margin="2">
-                <Border CornerRadius="5" Background="{DynamicResource Panel}" Height="132" Padding="2">
-                  <Image Source="{Binding Image, Mode=OneWay}" Stretch="Uniform" />
-                </Border>
-                <TextBlock Text="{Binding Label}" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="11"
-                           Foreground="{DynamicResource Subtle}" />
-              </StackPanel>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
       </Grid>
     </Grid>
 

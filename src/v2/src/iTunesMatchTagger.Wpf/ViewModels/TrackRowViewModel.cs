@@ -190,6 +190,69 @@ public sealed class TrackRowViewModel : INotifyPropertyChanged
         _activeCandidateIndex = candidates.Count == 0
             ? -1
             : Math.Clamp(autoSelectIndex, 0, candidates.Count - 1);
+        ActiveSourceId = _activeCandidateIndex >= 0 ? _candidates[_activeCandidateIndex].SourceId : null;
+        ApplyActiveCandidate();
+    }
+
+    /// <summary>Candidates returned by one source, in result order.</summary>
+    public IReadOnlyList<TagCandidate> CandidatesForSource(string sourceId) =>
+        _candidates.Where(c => c.SourceId == sourceId).ToList();
+
+    private int FindCandidateIndex(TagCandidate candidate)
+    {
+        for (var i = 0; i < _candidates.Count; i++)
+        {
+            if (ReferenceEquals(_candidates[i], candidate))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// View selector per source: picks which of that source's candidates its
+    /// comparison column displays. <paramref name="indexInSource"/> is the
+    /// index within <see cref="CandidatesForSource"/>. Does not change what
+    /// gets written (that is <see cref="ActiveSourceId"/>).
+    /// </summary>
+    public void SelectCandidateForSource(string sourceId, int indexInSource)
+    {
+        var sourceCandidates = CandidatesForSource(sourceId);
+        if (indexInSource < 0 || indexInSource >= sourceCandidates.Count)
+        {
+            return;
+        }
+
+        var globalIndex = FindCandidateIndex(sourceCandidates[indexInSource]);
+        _sourcePick[sourceId] = globalIndex;
+        if (sourceId == ActiveSourceId)
+        {
+            _activeCandidateIndex = globalIndex;
+            ApplyActiveCandidate();
+        }
+        else
+        {
+            Raise();
+        }
+    }
+
+    /// <summary>The source whose picked candidate is written by the update step.</summary>
+    public string? ActiveSourceId { get; private set; }
+
+    /// <summary>Switches what gets written to the picked candidate of <paramref name="sourceId"/>.</summary>
+    public void SetActiveSource(string sourceId)
+    {
+        var index = CandidateIndexForSource(sourceId);
+        if (index < 0)
+        {
+            return;
+        }
+
+        _sourcePick[sourceId] = index;
+        ActiveSourceId = sourceId;
+        _activeCandidateIndex = index;
         ApplyActiveCandidate();
     }
 

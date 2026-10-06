@@ -2,6 +2,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using iTunesMatchTagger.Core.Sources;
 using iTunesMatchTagger.Wpf.ViewModels;
 
@@ -10,8 +11,17 @@ namespace iTunesMatchTagger.Wpf;
 public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
-    private bool _updatingPicker;
+    private bool _updatingPickers;
     private TrackRowViewModel? _watchedRow;
+
+    /// <summary>The four source comparison columns of the detail grid (in DataGrid.Columns order).</summary>
+    private static readonly (string SourceId, string Label)[] SourceColumns =
+    [
+        (TagSources.ITunes, "Apple"),
+        (TagSources.MusicBrainz, "MusicBrainz"),
+        (TagSources.Discogs, "Discogs"),
+        (TagSources.Deezer, "Deezer"),
+    ];
 
     public MainWindow()
     {
@@ -47,8 +57,8 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// The selected row keeps changing after selection (lookup outcomes,
-    /// candidate picks, update writes) - keep the picker and the artwork
-    /// strip in sync with it.
+    /// candidate picks, update writes) - keep the pickers and the grid in
+    /// sync with it.
     /// </summary>
     private void WatchRow(TrackRowViewModel? row)
     {
@@ -73,58 +83,129 @@ public partial class MainWindow : Window
 
     private void RefreshDetail()
     {
-        var row = _viewModel.SelectedRow;
-
-        _updatingPicker = true;
-        CandidatePicker.ItemsSource = row?.CandidateOptions;
-        CandidatePicker.SelectedIndex = row?.ActiveCandidateIndex ?? -1;
-        _updatingPicker = false;
-
-        RebuildArtworkStrip(row);
-    }
-
-    private void CandidatePicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_updatingPicker || _viewModel.SelectedRow is not { } row)
+        if (_updatingPickers)
         {
             return;
         }
 
-        var index = CandidatePicker.SelectedIndex;
-        if (index >= 0)
+        var row = _viewModel.SelectedRow;
+
+        _updatingPickers = true;
+        RebuildWriteFromPicker(row);
+        RebuildSourceHeaders(row);
+        _updatingPickers = false;
+    }
+
+    // ------------------------------------------------------------------
+    // "Write from" picker: which source's picked candidate gets written
+    // ------------------------------------------------------------------
+
+    private void RebuildWriteFromPicker(TrackRowViewModel? row)
+    {
+        WriteFromPicker.Items.Clear();
+        if (row is null)
         {
-            row.SelectCandidate(index);
-            RebuildArtworkStrip(row);
+            return;
+        }
+
+        foreach (var (sourceId, label) in SourceColumns)
+        {
+            if (row.CandidatesForSource(sourceId).Count > 0)
+            {
+                _ = WriteFromPicker.Items.Add(new ComboBoxItem { Content = label, Tag = sourceId });
+            }
+        }
+
+        var index = 0;
+        foreach (ComboBoxItem item in WriteFromPicker.Items)
+        {
+            if ((string?)item.Tag == row.ActiveSourceId)
+            {
+                WriteFromPicker.SelectedIndex = index;
+                return;
+            }
+
+            index++;
+        }
+    }
+
+    private void WriteFromPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingPickers)
+        {
+            return;
+        }
+
+        if (WriteFromPicker.SelectedItem is ComboBoxItem { Tag: { } tag } && _viewModel.SelectedRow is { } row)
+        {
+            row.SetActiveSource((string)tag);
         }
     }
 
     // ------------------------------------------------------------------
-    // Artwork strip (Current + one preview per source)
+    // Per-source candidate pickers in the column headers
     // ------------------------------------------------------------------
 
-    public sealed record ArtworkStripItem(string Label, System.Windows.Media.ImageSource? Image);
-
-    private static readonly (string SourceId, string Label)[] StripSources =
-    [
-        (TagSources.ITunes, "Apple"),
-        (TagSources.MusicBrainz, "MusicBrainz"),
-        (TagSources.Discogs, "Discogs"),
-        (TagSources.Deezer, "Deezer"),
-    ];
-
-    private void RebuildArtworkStrip(TrackRowViewModel? row)
+    private void RebuildSourceHeaders(TrackRowViewModel? row)
     {
-        var items = new List<ArtworkStripItem> { new("Current", Imaging.FromBytes(row?.CurrentArtwork)) };
-        if (row is not null)
+        for (var i = 0; i < SourceColumns.Length; i++)
         {
-            foreach (var (sourceId, label) in StripSources)
+            var (sourceId, label) = SourceColumns[i];
+            var column = DetailGrid.Columns[3 + i]; // after Use | Field | Current
+
+            var candidates = row?.CandidatesForSource(sourceId) ?? [];
+            if (row is null || candidates.Count == 0)
             {
-                var index = row.CandidateIndexForSource(sourceId);
-                items.Add(new ArtworkStripItem(label, Imaging.FromBytes(row.GetCandidateArtwork(index))));
+                column.Header = label;
+                continue;
             }
+
+            var picker = new ComboBox
+            {
+                MinWidth = 150,
+                Margin = new Thickness(2, 2, 4, 2),
+                DisplayMemberPath = nameof(SourceCandidateOption.DisplayName),
+                Tag = sourceId,
+            };
+
+            var indexInSource = -1;
+            for (var c = 0; c < candidates.Count; c++)
+            {
+                _ = picker.Items.Add(new SourceCandidateOption(c, candidates[c]));
+                if (ReferenceEquals(candidates[c], row.CandidateForSource(sourceId)))
+                {
+                    indexInSource = c;
+                }
+            }
+
+            picker.SelectedIndex = indexInSource;
+            picker.SelectionChanged += SourceHeaderPicker_SelectionChanged;
+
+            var header = new StackPanel();
+            header.Children.Add(new TextBlock
+            {
+                Text = label,
+                Foreground = (Brush)FindResource("Subtle"),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(2, 2, 0, 0),
+            });
+            header.Children.Add(picker);
+            column.Header = header;
+        }
+    }
+
+    private void SourceHeaderPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingPickers || sender is not ComboBox { Tag: { } tag } picker)
+        {
+            return;
         }
 
-        ArtworkStrip.ItemsSource = items;
+        if (picker.SelectedIndex >= 0 && _viewModel.SelectedRow is { } row)
+        {
+            row.SelectCandidateForSource((string)tag, picker.SelectedIndex);
+        }
     }
 
     // ------------------------------------------------------------------

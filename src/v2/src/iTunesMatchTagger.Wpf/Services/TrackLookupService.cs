@@ -163,6 +163,7 @@ public static class TrackLookupService
         }
 
         // Artwork previews (300px) for the candidate strip.
+        candidates = Deduplicate(candidates);
         var previews = new Dictionary<int, byte[]>();
         foreach (var candidate in candidates)
         {
@@ -195,6 +196,26 @@ public static class TrackLookupService
             appleResult?.TrackId,
             autoSelectIndex,
             previews);
+    }
+
+    /// <summary>
+    /// Drops candidates that repeat within the same source (Apple's ID lookup
+    /// and term search often return the very same release).
+    /// </summary>
+    private static List<TagCandidate> Deduplicate(IReadOnlyList<TagCandidate> candidates)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<TagCandidate>(candidates.Count);
+        foreach (var candidate in candidates)
+        {
+            var key = $"{candidate.SourceId}|{candidate.Title}|{candidate.Album}|{candidate.Details}";
+            if (seen.Add(key))
+            {
+                result.Add(candidate);
+            }
+        }
+
+        return result;
     }
 
     public static string BuildLookupStatus(TrackRowViewModel row, LookupOutcome outcome)
