@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using iTunesMatchTagger.Core.Lookup;
@@ -17,7 +18,40 @@ public sealed class AppSettings
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public List<string> SelectedCountries { get; set; } = [.. StoreCountries.DefaultSelected];
+    /// <summary>
+    /// iTunes storefronts tried in order for Apple lookups. Hand-edited in
+    /// settings.json (the UI has no selector); when a track ID is not found
+    /// in any of them, the app sweeps the remaining storefronts automatically.
+    /// Default: the machine's own storefront first, then US, GB and JP.
+    /// </summary>
+    public List<string> SelectedCountries { get; set; } = [.. DefaultCountries()];
+
+    private static List<string> DefaultCountries()
+    {
+        var countries = new List<string>();
+        try
+        {
+            var own = RegionInfo.CurrentRegion.TwoLetterISORegionName.ToUpperInvariant();
+            if (StoreCountries.All.Contains(own))
+            {
+                countries.Add(own);
+            }
+        }
+        catch (ArgumentException)
+        {
+            // no current region; the fallback list below still applies
+        }
+
+        foreach (var code in (string[])["US", "GB", "JP"])
+        {
+            if (!countries.Contains(code))
+            {
+                countries.Add(code);
+            }
+        }
+
+        return countries;
+    }
 
     /// <summary>Query every enabled tag source on every lookup, even when Apple matches (slower, richer comparison).</summary>
     public bool QueryAllSources { get; set; }

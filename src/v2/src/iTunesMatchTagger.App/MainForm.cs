@@ -50,7 +50,7 @@ public sealed class MainForm : Form
     private CancellationTokenSource? _cancellation;
     private bool _busy;
 
-    private CheckedListBox _countries = new();
+    private AppSettings _settings = new();
     private CheckedListBox _sourcesList = new();
     private CheckBox _alwaysQueryAll = new();
     private CheckBox _includeLyrics = new();
@@ -96,20 +96,6 @@ public sealed class MainForm : Form
         }
 
         LoadSettings();
-    }
-
-    private IReadOnlyList<string> CheckedCountries()
-    {
-        var selected = new List<string>();
-        foreach (var item in _countries.CheckedItems)
-        {
-            if (item is string country)
-            {
-                selected.Add(country);
-            }
-        }
-
-        return selected;
     }
 
     // ------------------------------------------------------------------
@@ -271,7 +257,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        var countries = CheckedCountries();
+        var countries = _settings.SelectedCountries;
         var fallbackSources = BuildSourceChain(out var sourceErrors);
         if (countries.Count == 0 && fallbackSources.Count == 0)
         {
@@ -412,11 +398,31 @@ public sealed class MainForm : Form
 
             if (appleResult is null)
             {
-                // The embedded ID is dead in every selected storefront (Apple
-                // delists albums; the file keeps the old ID). Fall back to
-                // searching by the current tags - re-released albums come back
-                // under a new ID that an ID lookup would never find.
-                Log($"Track ID {row.Track.TrackId} not found in any selected country, trying search by current tags: {row.File}", LogSeverity.Information);
+                // The embedded ID is dead in every configured storefront (Apple
+                // delists albums; the file keeps the old ID). Sweep the
+                // remaining storefronts before giving up - regional catalogs
+                // differ, so a delisted album may still live somewhere else.
+                Log($"Track ID {row.Track.TrackId} not found in the configured countries, sweeping the other storefronts: {row.File}", LogSeverity.Information);
+                var tried = countries.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (var country in StoreCountries.All.Where(c => !tried.Contains(c)))
+                {
+                    var found = await _search.LookupTrackAsync(row.Track.TrackId, country, cancellationToken).ConfigureAwait(false);
+                    if (found is not null)
+                    {
+                        LogDebug($"Track ID {row.Track.TrackId} found in {country} (sweep): {row.File}");
+                        appleResult = found;
+                        foundIn = country;
+                        break;
+                    }
+                }
+            }
+
+            if (appleResult is null)
+            {
+                // The ID is dead everywhere. Fall back to searching by the
+                // current tags - re-released albums come back under a new ID
+                // that an ID lookup would never find.
+                Log($"Track ID {row.Track.TrackId} not found in any storefront, trying search by current tags: {row.File}", LogSeverity.Information);
             }
         }
 
@@ -867,22 +873,6 @@ public sealed class MainForm : Form
             MessageBoxIcon.Information);
     }
 
-    private void BtnSelectAllCountries_Click(object? sender, EventArgs e)
-    {
-        for (var i = 0; i < _countries.Items.Count; i++)
-        {
-            _countries.SetItemChecked(i, true);
-        }
-    }
-
-    private void BtnClearCountries_Click(object? sender, EventArgs e)
-    {
-        for (var i = 0; i < _countries.Items.Count; i++)
-        {
-            _countries.SetItemChecked(i, false);
-        }
-    }
-
     private void TrackList_SelectedIndexChanged(object? sender, EventArgs e)
     {
         var row = SelectedRow();
@@ -1319,45 +1309,11 @@ public sealed class MainForm : Form
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
+            ColumnCount = 2,
             RowCount = 1,
         };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
-
-        var countriesGroup = new GroupBox
-        {
-            Text = "iTunes Store countries",
-            Dock = DockStyle.Fill,
-        };
-        _countries = new CheckedListBox
-        {
-            Dock = DockStyle.Fill,
-            CheckOnClick = true,
-            IntegralHeight = false,
-            MultiColumn = true, // 134 storefronts - columns avoid long scrolling
-            ColumnWidth = 130,
-        };
-        foreach (var country in StoreCountries.All)
-        {
-            _countries.Items.Add(country, StoreCountries.DefaultSelected.Contains(country));
-        }
-
-        var countryButtons = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Bottom,
-            FlowDirection = FlowDirection.LeftToRight,
-            Height = 32,
-        };
-        countryButtons.Controls.Add(new Button { Text = "Select all", AutoSize = true });
-        ((Button)countryButtons.Controls[0]).Click += BtnSelectAllCountries_Click;
-        var clearButton = new Button { Text = "Clear", AutoSize = true };
-        clearButton.Click += BtnClearCountries_Click;
-        countryButtons.Controls.Add(clearButton);
-
-        countriesGroup.Controls.Add(_countries);
-        countriesGroup.Controls.Add(countryButtons);
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
 
         var sourcesGroup = new GroupBox
         {
@@ -1468,9 +1424,8 @@ public sealed class MainForm : Form
         _optionsGrid.DataSource = _options;
         optionsGroup.Controls.Add(_optionsGrid);
 
-        panel.Controls.Add(countriesGroup, 0, 0);
-        panel.Controls.Add(sourcesGroup, 1, 0);
-        panel.Controls.Add(optionsGroup, 2, 0);
+        panel.Controls.Add(sourcesGroup, 0, 0);
+        panel.Controls.Add(optionsGroup, 1, 0);
         return panel;
     }
 
@@ -1833,12 +1788,7 @@ public sealed class MainForm : Form
 
     private void LoadSettings()
     {
-        var settings = AppSettings.Load();
-
-        for (var i = 0; i < StoreCountries.All.Count; i++)
-        {
-            _countries.SetItemChecked(i, settings.SelectedCountries.Contains(StoreCountries.All[i]));
-        }
+        var settings = _settings = AppSettings.Load();
 
         foreach (var option in _options)
         {
@@ -1866,17 +1816,16 @@ public sealed class MainForm : Form
 
     private void SaveSettings()
     {
-        var settings = new AppSettings
-        {
-            SelectedCountries = [.. CheckedCountries()],
-            QueryAllSources = _alwaysQueryAll.Checked,
-            IncludeLyrics = _includeLyrics.Checked,
-            Sources =
-            [
-                new TagSourceSettings { Id = TagSources.ITunes, Enabled = true, Token = null },
-                .. CheckedSourceIds().Select(static id => new TagSourceSettings { Id = id, Enabled = true }),
-            ],
-        };
+        // SelectedCountries are hand-edited in settings.json; the UI never
+        // rewrites them.
+        var settings = _settings;
+        settings.QueryAllSources = _alwaysQueryAll.Checked;
+        settings.IncludeLyrics = _includeLyrics.Checked;
+        settings.Sources =
+        [
+            new TagSourceSettings { Id = TagSources.ITunes, Enabled = true, Token = null },
+            .. CheckedSourceIds().Select(static id => new TagSourceSettings { Id = id, Enabled = true }),
+        ];
 
         if (_discogsToken.Text.Trim() is { Length: > 0 } token)
         {

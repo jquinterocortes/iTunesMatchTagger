@@ -6,9 +6,6 @@ namespace iTunesMatchTagger.Core.Lookup;
 /// </summary>
 public static class StoreCountries
 {
-    /// <summary>Countries the upstream UI checked by default (first eight entries).</summary>
-    public static readonly string[] DefaultSelected = ["US", "GB", "AU", "FR", "DE", "CA", "IT", "JP"];
-
     public static readonly IReadOnlyList<string> All =
     [
         "US", "GB", "AU", "FR", "DE", "CA", "IT", "JP",
