@@ -833,7 +833,14 @@ public sealed class MainForm : Form
     //    playlist memberships are restored (or re-targeted) afterwards.
     // ------------------------------------------------------------------
 
-    private async void BtnRescan_Click(object? sender, EventArgs e)
+    private sealed record RescanOutcome(
+        TrackRow? Row,
+        string Status,
+        StatusKind Severity,
+        string LogMessage,
+        LogSeverity LogSeverity);
+
+    private void BtnRescan_Click(object? sender, EventArgs e)
     {
         if (!EnsureNotBusy())
         {
@@ -850,12 +857,13 @@ public sealed class MainForm : Form
             return;
         }
 
+        var restoreMode = _playlistPicker.SelectedItem as string ?? AutomaticPlaylistsOption;
         var confirmed = MessageBox.Show(this,
             $"Force re-scan {rescannable.Count} track(s)?\n\n" +
             "For each track: the library entry is deleted (the Match state lives there), the audio is recreated as a fresh copy file " +
             "('name (rematch).ext', like a manual copy + re-add) and re-imported so Apple's match engine evaluates it again, " +
             "then the playlist memberships are restored.\n\n" +
-            $"Playlist target: '{_playlistPicker.SelectedItem as string ?? AutomaticPlaylistsOption}'.\n\n" +
+            $"Playlist target: '{restoreMode}'.\n\n" +
             "Continue?",
             Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
         if (confirmed != DialogResult.Yes)
@@ -863,24 +871,64 @@ public sealed class MainForm : Form
             return;
         }
 
-        var restoreMode = _playlistPicker.SelectedItem as string ?? AutomaticPlaylistsOption;
         SetBusy(true);
         _progress.Value = 0;
         _progress.Maximum = rescannable.Count;
+        _cancellation = new CancellationTokenSource();
         Log($"Force re-scan started: {rescannable.Count} track(s), playlists: '{restoreMode}'.");
+        _trackList.Invalidate();
 
+        var sink = new Progress<RescanOutcome>(ApplyRescanOutcome);
+        var rows = rescannable;
+        var token = _cancellation.Token;
+        var worker = new Thread(() => RunRescan(rows, restoreMode, sink, token))
+        {
+            IsBackground = true,
+            Name = "iTunesMatchTagger-Rescan",
+        };
+        worker.SetApartmentState(ApartmentState.STA); // COM requires an STA; the client is created inside
+        worker.Start();
+    }
+
+    /// <summary>
+    /// Runs on a dedicated STA background thread with its OWN COM
+    /// connection (RCWs are apartment-bound; the UI-thread track objects
+    /// must not be touched from here). Reports everything through the
+    /// sink. The old flow froze the UI for minutes by enumerating the
+    /// whole library via COM on the UI thread.
+    /// </summary>
+    private void RunRescan(IReadOnlyList<TrackRow> rows, string restoreMode, IProgress<RescanOutcome> sink, CancellationToken cancellationToken)
+    {
         try
         {
-            foreach (var row in rescannable)
+            using var client = new ITunesComClient();
+
+            foreach (var row in rows)
             {
-                _progress.PerformStep();
+                cancellationToken.ThrowIfCancellationRequested();
                 var path = row.File;
-                var oldTrack = (ComTrack)row.Track;
 
                 try
                 {
-                    // Step 1: discover playlists to restore BEFORE anything changes.
-                    var originalPlaylists = _itunes.GetTrackPlaylistNames(oldTrack);
+                    sink.Report(new RescanOutcome(row, string.Empty, StatusKind.Neutral, $"Re-scanning: {path}", LogSeverity.Information));
+
+                    // Step 1: resolve the library entry - NEVER delete the
+                    // playlist-view object (the Match state lives with the
+                    // library entry).
+                    var oldTrack = (ComTrack)row.Track;
+                    var libraryTrack = client.FindLibraryTrack(oldTrack.DatabaseId, path, row.GetCurrent("trackName"));
+                    if (libraryTrack is null ||
+                        !string.Equals(libraryTrack.Location, path, StringComparison.OrdinalIgnoreCase))
+                    {
+                        sink.Report(new RescanOutcome(row,
+                            "Re-scan skipped: library entry not found or stale - refresh with \"1. Get selected tracks\"", StatusKind.Error,
+                            $"Re-scan skipped, library entry not found/mismatched for database ID {oldTrack.DatabaseId}: {path}", LogSeverity.Error));
+                        sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral, string.Empty, LogSeverity.Debug));
+                        continue;
+                    }
+
+                    // Step 2: the song's playlists, discovered before deleting.
+                    var originalPlaylists = client.GetTrackPlaylistNames(libraryTrack);
                     var targetPlaylists = new List<string>(originalPlaylists);
                     if (restoreMode is not AutomaticPlaylistsOption and not NoPlaylistOption &&
                         !targetPlaylists.Contains(restoreMode, StringComparer.OrdinalIgnoreCase))
@@ -888,52 +936,36 @@ public sealed class MainForm : Form
                         targetPlaylists.Add(restoreMode);
                     }
 
-                    // Step 2: keep the file bytes - iTunes may delete/trash the
-                    // file together with the library entry.
-                    byte[]? fileBytes;
-                    if (File.Exists(path))
+                    // Step 3: keep the file bytes - the removal may delete/trash it.
+                    if (!File.Exists(path))
                     {
-                        fileBytes = await File.ReadAllBytesAsync(path).ConfigureAwait(true);
-                    }
-                    else
-                    {
-                        row.SetStatus("Re-scan skipped: file not found on disk", StatusKind.Error);
-                        Log($"Re-scan skipped, file missing: {path}", LogSeverity.Error);
+                        sink.Report(new RescanOutcome(row, "Re-scan skipped: file not found on disk", StatusKind.Error,
+                            $"Re-scan skipped, file missing: {path}", LogSeverity.Error));
+                        sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral, string.Empty, LogSeverity.Debug));
                         continue;
                     }
 
-                    // Step 3: delete the LIBRARY entry. The object from
-                    // SelectedTracks is a playlist-view object (a song in N
-                    // playlists is N track objects; the Match state lives
-                    // with the library entry), so resolve it by
-                    // TrackDatabaseID before deleting.
-                    var databaseId = (int)oldTrack.Raw.TrackDatabaseID;
-                    var libraryTrack = _itunes.FindLibraryTrack(databaseId);
-                    if (libraryTrack is null)
-                    {
-                        row.SetStatus("Re-scan skipped: library entry not found", StatusKind.Error);
-                        Log($"Re-scan skipped, no library entry with database ID {databaseId}: {path}", LogSeverity.Error);
-                        continue;
-                    }
+                    var fileBytes = File.ReadAllBytes(path);
 
-                    _itunes.RemoveFromLibrary(libraryTrack);
-                    LogDebug($"Removed library entry {databaseId}: {path}");
+                    // Step 4: delete the library entry (may take the file with it).
+                    client.RemoveFromLibrary(libraryTrack);
+                    sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral,
+                        $"Removed library entry {oldTrack.DatabaseId}: {path}", LogSeverity.Debug));
 
-                    // Step 4: recreate the audio as a NEW file (copy) in the
-                    // same folder - re-adding under the original path can
-                    // re-link to the previous iCloud upload ("Uploaded")
-                    // instead of re-evaluating the match. Mirrors the manual
-                    // flow: copy -> delete -> add the copy.
+                    // Step 5: recreate the audio as a NEW copy file - re-adding
+                    // under the original path can re-link to the previous
+                    // iCloud upload ("Uploaded") instead of re-evaluating.
                     var copyPath = BuildRematchCopyPath(path);
-                    await File.WriteAllBytesAsync(copyPath, fileBytes).ConfigureAwait(true);
-                    fileBytes = null; // bytes now on disk as the copy
+                    File.WriteAllBytes(copyPath, fileBytes);
 
-                    // Step 5: re-import the copy (triggers a fresh scan).
-                    var reAdded = _itunes.AddFileToLibrary(copyPath);
+                    // Step 6: re-import the copy (triggers a fresh scan).
+                    var reAdded = client.AddFileToLibrary(copyPath);
                     if (reAdded is null)
                     {
-                        row.SetStatus($"Re-scan failed: iTunes did not re-add the file (copy left at '{copyPath}')", StatusKind.Error);
-                        Log($"Re-scan: iTunes did not re-add '{copyPath}'", LogSeverity.Error);
+                        sink.Report(new RescanOutcome(row,
+                            $"Re-scan failed: iTunes did not re-add the file (copy left at '{copyPath}')", StatusKind.Error,
+                            $"Re-scan: iTunes did not re-add '{copyPath}'", LogSeverity.Error));
+                        sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral, string.Empty, LogSeverity.Debug));
                         continue;
                     }
 
@@ -942,90 +974,122 @@ public sealed class MainForm : Form
                     if (File.Exists(path))
                     {
                         File.Delete(path);
-                        LogDebug($"Removed leftover original: {path}");
+                        sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral,
+                            $"Removed leftover original: {path}", LogSeverity.Debug));
                     }
 
-                    // Step 6: bring the playlists back (smart/system ones excluded).
+                    // Step 7: bring the playlists back (smart/system ones excluded).
                     var restored = new List<string>();
                     var failed = new List<string>();
                     foreach (var playlistName in targetPlaylists)
                     {
                         try
                         {
-                            if (_itunes.AddTrackToPlaylist(playlistName, reAdded))
+                            if (client.AddTrackToPlaylist(playlistName, reAdded))
                             {
                                 restored.Add(playlistName);
                             }
                             else
                             {
-                                LogDebug($"Playlist '{playlistName}' unavailable or already had the track: {path}");
+                                sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral,
+                                    $"Playlist '{playlistName}' unavailable or already had the track: {path}", LogSeverity.Debug));
                             }
                         }
                         catch (Exception ex) when (ex is COMException or RuntimeBinderException or TargetInvocationException)
                         {
                             failed.Add(playlistName);
-                            Log($"Could not re-add to playlist '{playlistName}' ({ex.Message}): {path}", LogSeverity.Warning);
+                            sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral,
+                                $"Could not re-add to playlist '{playlistName}' ({ex.Message}): {path}", LogSeverity.Warning));
                         }
                     }
 
-                    row.ReplaceTrack(reAdded);
-
-                    var kind = DescribeKind(reAdded);
+                    var kind = client.GetKindAsString(reAdded);
                     var playlistSuffix = restored.Count > 0
                         ? $", back in {restored.Count} playlist(s): {string.Join(", ", restored)}"
                         : string.Empty;
-                    var fileSuffix = $" (library file now '{Path.GetFileName(copyPath)}')";
 
                     if (reAdded.TrackId > 0)
                     {
-                        row.SetStatus($"Re-scanned: now '{kind}' (catalog ID {reAdded.TrackId}){playlistSuffix}", StatusKind.Success);
-                        Log($"Re-scanned: '{kind}' with catalog ID {reAdded.TrackId}{playlistSuffix}: {copyPath}");
+                        sink.Report(new RescanOutcome(row,
+                            $"Re-scanned: now '{kind}' (catalog ID {reAdded.TrackId}){playlistSuffix}", StatusKind.Success,
+                            $"Re-scanned: '{kind}' with catalog ID {reAdded.TrackId}{playlistSuffix}: {copyPath}", LogSeverity.Information));
                     }
                     else
                     {
-                        row.SetStatus($"Re-scanned: Apple is evaluating ({kind}){playlistSuffix} - check again in a few minutes", StatusKind.Warning);
-                        Log($"Re-scanned: still '{kind}', Apple is evaluating{playlistSuffix}: {copyPath}", LogSeverity.Warning);
+                        sink.Report(new RescanOutcome(row,
+                            $"Re-scanned: Apple is evaluating ({kind}){playlistSuffix} - check again in a few minutes", StatusKind.Warning,
+                            $"Re-scanned: still '{kind}', Apple is evaluating{playlistSuffix}: {copyPath}", LogSeverity.Warning));
                     }
 
                     if (failed.Count > 0)
                     {
-                        Log($"Playlists needing manual attention: {string.Join(", ", failed)}", LogSeverity.Warning);
+                        sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral,
+                            $"Playlists needing manual attention: {string.Join(", ", failed)}", LogSeverity.Warning));
                     }
                 }
-                catch (Exception ex) when (ex is COMException or RuntimeBinderException or TargetInvocationException)
+                catch (OperationCanceledException)
                 {
-                    row.SetStatus($"Re-scan COM error: {ex.Message}", StatusKind.Error);
-                    Log($"Re-scan failed for '{path}': {ex.Message}", LogSeverity.Error);
+                    throw;
+                }
+                catch (COMException ex)
+                {
+                    sink.Report(new RescanOutcome(row, $"Re-scan COM error: {ex.Message}", StatusKind.Error,
+                        $"Re-scan failed for '{path}': {ex.Message}", LogSeverity.Error));
+                    sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral, string.Empty, LogSeverity.Debug));
                 }
                 catch (IOException ex)
                 {
-                    row.SetStatus($"Re-scan file error: {ex.Message}", StatusKind.Error);
-                    Log($"Re-scan failed for '{path}': {ex.Message}", LogSeverity.Error);
+                    sink.Report(new RescanOutcome(row, $"Re-scan file error: {ex.Message}", StatusKind.Error,
+                        $"Re-scan failed for '{path}': {ex.Message}", LogSeverity.Error));
+                    sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral, string.Empty, LogSeverity.Debug));
                 }
             }
 
-            Log("Force re-scan complete. Match status may keep changing while iTunes syncs.");
+            sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral,
+                "Force re-scan complete. Match status may keep changing while iTunes syncs; re-select the tracks (1) to refresh the app.", LogSeverity.Information));
+        }
+        catch (OperationCanceledException)
+        {
+            sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral, "Force re-scan cancelled.", LogSeverity.Warning));
+        }
+        catch (COMException ex)
+        {
+            sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral, $"Could not connect to iTunes: {ex.Message}", LogSeverity.Error));
         }
         catch (Exception ex)
         {
-            Log($"Re-scan failed: {ex.Message}", LogSeverity.Error);
+            sink.Report(new RescanOutcome(null, string.Empty, StatusKind.Neutral, $"Force re-scan failed: {ex.Message}", LogSeverity.Error));
         }
         finally
         {
-            SetBusy(false);
-            InvalidateSelection();
+            BeginInvoke(new Action(() => SetBusy(false)));
         }
     }
 
-    private static string DescribeKind(ComTrack track)
+    /// <summary>Runs on the UI thread (posted through <see cref="Progress{T}"/>): applies one worker outcome.</summary>
+    private void ApplyRescanOutcome(RescanOutcome outcome)
     {
-        try
+        if (outcome.LogMessage.Length > 0)
         {
-            return (string)track.Raw.KindAsString;
+            Log(outcome.LogMessage, outcome.LogSeverity);
         }
-        catch (Exception ex) when (ex is COMException or RuntimeBinderException or TargetInvocationException)
+
+        if (outcome.Row is not null)
         {
-            return "unknown kind";
+            if (outcome.Status.Length > 0)
+            {
+                outcome.Row.SetStatus(outcome.Status, outcome.Severity);
+                _trackList.Invalidate();
+
+                if (ReferenceEquals(SelectedRow(), outcome.Row))
+                {
+                    FillDetail(outcome.Row);
+                }
+            }
+            else
+            {
+                _progress.PerformStep(); // a step per fully handled row
+            }
         }
     }
 

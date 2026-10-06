@@ -86,11 +86,17 @@ Instructions for AI coding agents working in this repository.
   the previous iCloud upload instead of re-evaluating), (5)
   `LibraryPlaylist.AddFile(copy)`, delete any leftover original, (6)
   restore playlists with `IITUserPlaylist::AddTrack` (VT_DISPATCH of the
-  new library track; per-playlist try/catch). The picker: "(track's
+  new library track; per-playlist try/catch). ALL of that runs on a
+  dedicated STA background thread with its own `ITunesComClient`
+  connection (RCWs are apartment-bound and library enumeration via COM
+  froze the UI for minutes), reporting through `IProgress<RescanOutcome>`.
+  The library entry is resolved first by `IITPlaylist.Search` + database
+  ID (fast) with full enumeration only as fallback. Rows are NOT
+  re-bound after a re-scan (their COM object becomes stale) - the status
+  tells the user to re-run "1. Get selected tracks". The picker: "(track's
   playlists)" (default), "(library only)", or a specific playlist to also
   add the track to. Choice persists in `AppSettings.LastRescanPlaylistName`
-  ("(none)" = library-only). `TrackRow.ReplaceTrack` swaps the backing
-  track and clears all lookup state.
+  ("(none)" = library-only).
 - Lyrics (optional, "Include lyrics from LRCLib" checkbox): fetched from
   lrclib.net during the update step via `Sources/LyricsClient.cs`, written
   through `ITaggableTrack.WriteLyrics` (COM `track.Lyrics` / TagLib#

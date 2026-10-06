@@ -16,6 +16,15 @@ public sealed class ComTrack : ITaggableTrack
         Raw = raw;
         try
         {
+            DatabaseId = (long)((int)raw.TrackDatabaseID);
+        }
+        catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or TargetInvocationException)
+        {
+            DatabaseId = 0;
+        }
+
+        try
+        {
             Location = (string?)raw.Location;
         }
         catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or TargetInvocationException)
@@ -27,6 +36,9 @@ public sealed class ComTrack : ITaggableTrack
     }
 
     public dynamic Raw { get; }
+
+    /// <summary>iTunes' per-library database ID (the one shared by every playlist view of the song).</summary>
+    public long DatabaseId { get; }
 
     public string? Location { get; }
 

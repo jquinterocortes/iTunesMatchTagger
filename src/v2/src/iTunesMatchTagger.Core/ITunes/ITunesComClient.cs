@@ -46,25 +46,85 @@ public sealed class ITunesComClient : IDisposable
     }
 
     /// <summary>
-    /// Finds the LIBRARY representation of a song by its TrackDatabaseID.
-    /// This matters: track objects obtained from SelectedTracks are
-    /// playlist-view objects - deleting one only removes the playlist
-    /// membership, while the Match state lives with the library entry.
+    /// Finds the LIBRARY representation of a song. Resolution prefers the
+    /// fast playlist Search endpoint (a handful of calls) filtered by
+    /// TrackDatabaseID; the full-library enumeration is only a fallback.
+    /// When the database ID is unknown, the entry is matched by file
+    /// location instead. Returns null when nothing matches.
     /// </summary>
-    public ComTrack? FindLibraryTrack(long trackDatabaseId)
+    public ComTrack? FindLibraryTrack(long databaseId, string? location, string? nameHint)
     {
+        if (!string.IsNullOrWhiteSpace(nameHint))
+        {
+            try
+            {
+                dynamic found = Application.LibraryPlaylist.Search(nameHint, 0 /* ITPlaylistSearchFieldAll */);
+                int count = (int)found.Count;
+                for (int i = 1; i <= count; i++)
+                {
+                    dynamic candidate = found[i];
+                    if (MatchesLibraryEntry(candidate, databaseId, location))
+                    {
+                        return new ComTrack(candidate);
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+            {
+                // search unavailable or rejected the text; fall through
+            }
+        }
+
+        // Fallback: full enumeration (slow - keep off the UI thread).
         dynamic tracks = Application.LibraryPlaylist.Tracks;
-        int count = (int)tracks.Count;
-        for (int i = 1; i <= count; i++)
+        int total = (int)tracks.Count;
+        for (int i = 1; i <= total; i++)
         {
             dynamic candidate = tracks[i];
-            if ((int)candidate.TrackDatabaseID == trackDatabaseId)
+            if (MatchesLibraryEntry(candidate, databaseId, location))
             {
                 return new ComTrack(candidate);
             }
         }
 
         return null;
+    }
+
+    private static bool MatchesLibraryEntry(dynamic track, long databaseId, string? location)
+    {
+        try
+        {
+            if (databaseId != 0 && (long)((int)track.TrackDatabaseID) == databaseId)
+            {
+                return true;
+            }
+
+            if (databaseId == 0 &&
+                !string.IsNullOrEmpty(location) &&
+                string.Equals((string?)track.Location, location, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+        {
+            // unreadable entry (cloud-only track, ...)
+        }
+
+        return false;
+    }
+
+    /// <summary>The localized KindAsString of a track ("Matched AAC audio file", "Uploaded ...", ...).</summary>
+    public string GetKindAsString(ComTrack track)
+    {
+        try
+        {
+            return (string)track.Raw.KindAsString;
+        }
+        catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+        {
+            return "unknown kind";
+        }
     }
 
     /// <summary>
