@@ -33,16 +33,14 @@
         <Image Height="96" Stretch="Uniform" HorizontalAlignment="Left" Margin="1"
                Source="{Binding Image, Mode=OneWay}"
                Visibility="{Binding Image, Converter={StaticResource NullToCollapsed}}" />
-        <TextBlock Text="{Binding Text, Mode=OneWay}">
+        <TextBlock Text="{Binding Text, Mode=OneWay}"
+                   Visibility="{Binding Image, Converter={StaticResource NullToVisible}}">
           <TextBlock.Style>
             <Style TargetType="TextBlock" BasedOn="{StaticResource FieldText}">
               <Style.Triggers>
                 <DataTrigger Binding="{Binding IsDifferent}" Value="True">
                   <Setter Property="Foreground" Value="{DynamicResource Accent}" />
                   <Setter Property="FontWeight" Value="SemiBold" />
-                </DataTrigger>
-                <DataTrigger Binding="{Binding Image, Converter={StaticResource NullToVisible}}" Value="True">
-                  <Setter Property="Visibility" Value="Collapsed" />
                 </DataTrigger>
               </Style.Triggers>
             </Style>
@@ -81,9 +79,9 @@
     <!-- ================= Workspace ================= -->
     <Grid Grid.Row="1">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="2*" MinWidth="430" />
+        <ColumnDefinition Width="3*" MinWidth="360" />
         <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="3*" MinWidth="380" />
+        <ColumnDefinition Width="7*" MinWidth="420" />
       </Grid.ColumnDefinitions>
 
       <!--Tracks-->
@@ -163,9 +161,14 @@
                      Text="Pick a candidate per source in the column headers; this chooses which source is written." />
         </Grid>
 
-        <DataGrid Grid.Row="1" x:Name="DetailGrid"
-                  DataContext="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=DataContext}"
-                  ItemsSource="{Binding DetailRows, Mode=OneWay}">
+        <Grid Grid.Row="1">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <DataGrid x:Name="DetailGrid"
+                    DataContext="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=DataContext}"
+                    ItemsSource="{Binding DetailRows, Mode=OneWay}">
           <DataGrid.Columns>
             <DataGridCheckBoxColumn Header="Use" Binding="{Binding Use, UpdateSourceTrigger=PropertyChanged}" Width="44" />
             <DataGridTextColumn Header="Field" Binding="{Binding FieldName, Mode=OneWay}" Width="120" IsReadOnly="True" />
@@ -206,6 +209,24 @@
             </DataGridTemplateColumn>
           </DataGrid.Columns>
         </DataGrid>
+
+        <!-- Lyrics preview (no write; what Update would store) -->
+        <Border Grid.Row="1" Margin="0,8,0,0" Background="{DynamicResource Panel}" CornerRadius="6" Padding="10,8">
+          <StackPanel>
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Style="{StaticResource IconOnlyButton}" Content="&#x21bb;"
+                      Click="RefreshLyrics_Click" ToolTip="Search the lyrics again on LRCLib" />
+              <TextBlock Text="Lyrics preview" Foreground="{DynamicResource Subtle}" FontWeight="SemiBold" FontSize="12" />
+              <TextBlock Margin="10,0,0,0" VerticalAlignment="Center" FontSize="11.5"
+                         Foreground="{DynamicResource Subtle}" Text="{Binding LyricsStatus, Mode=OneWay}" />
+            </DockPanel>
+            <TextBox Height="110" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                     Margin="0,6,0,0" TextWrapping="NoWrap" AcceptsReturn="True"
+                     VerticalScrollBarVisibility="Auto"
+                     Text="{Binding LyricsPreview, Mode=OneWay}" />
+          </StackPanel>
+        </Border>
+      </Grid>
       </Grid>
     </Grid>
 

@@ -126,6 +126,103 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private string _trackCountText = "No tracks loaded";
 
+    public string LyricsPreview
+    {
+        get => _lyricsPreview;
+        private set
+        {
+            if (_lyricsPreview != value)
+            {
+                _lyricsPreview = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LyricsPreview)));
+            }
+        }
+    }
+
+    private string _lyricsPreview = string.Empty;
+
+    public string LyricsStatus
+    {
+        get => _lyricsStatus;
+        private set
+        {
+            if (_lyricsStatus != value)
+            {
+                _lyricsStatus = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LyricsStatus)));
+            }
+        }
+    }
+
+    private string _lyricsStatus = string.Empty;
+
+    private int _lyricsFetchId;
+
+    /// <summary>
+    /// Fetches (without writing) the LRCLib lyrics for the selected track so
+    /// the user can preview what "Update" would write.
+    /// </summary>
+    public async Task RefreshLyricsPreviewAsync()
+    {
+        var row = SelectedRow;
+        var fetchId = ++_lyricsFetchId;
+
+        if (row is null)
+        {
+            LyricsPreview = string.Empty;
+            LyricsStatus = string.Empty;
+            return;
+        }
+
+        // an empty candidate value ("") must not shadow the current tag
+        var title = FirstNonEmpty(row.GetProposed("trackName"), row.GetCurrent("trackName"));
+        var artist = FirstNonEmpty(row.GetProposed("artistName"), row.GetCurrent("artistName"));
+        var album = FirstNonEmpty(row.GetProposed("collectionName"), row.GetCurrent("collectionName"));
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))
+        {
+            LyricsPreview = string.Empty;
+            LyricsStatus = "No tags to search lyrics for.";
+            return;
+        }
+
+        LyricsStatus = "Searching on LRCLib…";
+        try
+        {
+            var lyrics = await _lyrics.LookupAsync(artist, title, album, row.Track.DurationMs, CancellationToken.None).ConfigureAwait(true);
+            if (fetchId != _lyricsFetchId)
+            {
+                return; // the user moved on to another track meanwhile
+            }
+
+            if (lyrics is null)
+            {
+                LyricsPreview = string.Empty;
+                LyricsStatus = "No lyrics found on LRCLib.";
+            }
+            else if (lyrics.IsEmpty)
+            {
+                LyricsPreview = string.Empty;
+                LyricsStatus = "Instrumental track (nothing to write).";
+            }
+            else
+            {
+                LyricsPreview = lyrics.Best!;
+                var lineCount = lyrics.Best!.Count(static l => l == '\n') + 1;
+                LyricsStatus = lyrics.Synced is null
+                    ? $"Plain text, {lineCount} line(s) (LRCLib #{lyrics.TrackId})"
+                    : $"Synced LRC, {lineCount} line(s) (LRCLib #{lyrics.TrackId})";
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            if (fetchId == _lyricsFetchId)
+            {
+                LyricsPreview = string.Empty;
+                LyricsStatus = $"LRCLib lookup failed: {ex.Message}";
+            }
+        }
+    }
+
     public int ProgressValue { get; private set; }
 
     public int ProgressMaximum { get; private set; }
@@ -664,7 +761,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         foreach (var field in TrackFields.All.Where(static f => f.VisibleInOptions))
         {
-            DetailRows.Add(new FieldComparisonRowViewModel(row, field, sourceIds));
+            DetailRows.Add(FieldComparisonRowViewModel.CreateValueRow(row, field, sourceIds));
+
+            if (field == TrackFields.Artwork)
+            {
+                DetailRows.Add(FieldComparisonRowViewModel.CreateArtworkPreviewRow(row, sourceIds));
+            }
         }
     }
 

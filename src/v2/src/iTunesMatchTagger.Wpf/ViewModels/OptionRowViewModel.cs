@@ -80,7 +80,7 @@ public sealed record SourceCell(string Text, bool IsDifferent, BitmapImage? Imag
 /// <summary>
 /// One comparison row of the detail panel: the field, the current value and
 /// one column per tag source. <see cref="Use"/> is the per-track field mask.
-/// The Album Artwork field renders image previews instead of URL text.
+/// The artwork field has a text row (URLs) plus a preview row (images).
 /// </summary>
 public sealed class FieldComparisonRowViewModel : INotifyPropertyChanged
 {
@@ -88,23 +88,34 @@ public sealed class FieldComparisonRowViewModel : INotifyPropertyChanged
     private readonly IReadOnlyList<string> _sourceIds;
     private readonly Dictionary<string, SourceCell> _sourceCells;
 
-    public FieldComparisonRowViewModel(TrackRowViewModel row, TrackField field, IReadOnlyList<string> sourceIds)
+    private FieldComparisonRowViewModel(TrackRowViewModel row, TrackField field, IReadOnlyList<string> sourceIds, bool renderImages, bool isPreview)
     {
         _row = row;
         Field = field;
         _sourceIds = sourceIds;
         _sourceCells = sourceIds.ToDictionary(static s => s, static _ => new SourceCell(string.Empty, false));
-        IsArtworkRow = Field == TrackFields.Artwork;
+        RenderImages = renderImages;
+        IsPreview = isPreview;
 
         Refresh();
     }
 
+    public static FieldComparisonRowViewModel CreateValueRow(TrackRowViewModel row, TrackField field, IReadOnlyList<string> sourceIds) =>
+        new(row, field, sourceIds, renderImages: false, isPreview: false);
+
+    /// <summary>The "Artwork Preview" pseudo-row: images in every column.</summary>
+    public static FieldComparisonRowViewModel CreateArtworkPreviewRow(TrackRowViewModel row, IReadOnlyList<string> sourceIds) =>
+        new(row, TrackFields.Artwork, sourceIds, renderImages: true, isPreview: true);
+
     public TrackField Field { get; }
 
-    /// <summary>The artwork row renders images instead of text.</summary>
-    public bool IsArtworkRow { get; }
+    /// <summary>Cells render image previews instead of text.</summary>
+    public bool RenderImages { get; }
 
-    public string FieldName => Field.DisplayName;
+    /// <summary>True for the "Artwork Preview" pseudo-row (not a real tag field).</summary>
+    public bool IsPreview { get; }
+
+    public string FieldName => IsPreview ? "Artwork Preview" : Field.DisplayName;
 
     /// <summary>Per-track field mask (writes only when checked "Use").</summary>
     public bool Use
@@ -112,8 +123,6 @@ public sealed class FieldComparisonRowViewModel : INotifyPropertyChanged
         get => _row.IsFieldEnabled(Field.LookupMember);
         set => _row.SetFieldEnabled(Field.LookupMember, value);
     }
-
-    public SourceCell CurrentCell { get; private set; } = new(string.Empty, false);
 
     public string Current
     {
@@ -124,13 +133,15 @@ public sealed class FieldComparisonRowViewModel : INotifyPropertyChanged
         }
     }
 
+    public SourceCell CurrentCell { get; private set; } = new(string.Empty, false);
+
     /// <summary>Per-source cells (indexed by source id, e.g. SourceCells[Apple]).</summary>
     public IReadOnlyDictionary<string, SourceCell> SourceCells => _sourceCells;
 
     /// <summary>Repaints every binding after any data change.</summary>
     public void Refresh()
     {
-        CurrentCell = IsArtworkRow
+        CurrentCell = RenderImages
             ? new SourceCell(string.Empty, false, Imaging.FromBytes(_row.CurrentArtwork))
             : new SourceCell(Current, false);
 
@@ -141,7 +152,7 @@ public sealed class FieldComparisonRowViewModel : INotifyPropertyChanged
                 ? string.Empty
                 : Field.GetFromCandidate?.Invoke(candidate)?.ToString() ?? string.Empty;
 
-            var image = IsArtworkRow && candidate is not null
+            var image = RenderImages && candidate is not null
                 ? Imaging.FromBytes(_row.GetCandidateArtwork(_row.CandidateIndexForSource(sourceId)))
                 : null;
 

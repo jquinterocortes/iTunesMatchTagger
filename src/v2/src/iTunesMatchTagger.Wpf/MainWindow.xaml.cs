@@ -52,6 +52,7 @@ public partial class MainWindow : Window
         {
             WatchRow(_viewModel.SelectedRow);
             RefreshDetail();
+            _ = _viewModel.RefreshLyricsPreviewAsync();
         }
     }
 
@@ -80,6 +81,9 @@ public partial class MainWindow : Window
     }
 
     private void OnWatchedRowChanged(object? sender, PropertyChangedEventArgs e) => RefreshDetail();
+
+    private async void RefreshLyrics_Click(object sender, RoutedEventArgs e) =>
+        await _viewModel.RefreshLyricsPreviewAsync();
 
     private void RefreshDetail()
     {
@@ -162,11 +166,16 @@ public partial class MainWindow : Window
 
             var picker = new ComboBox
             {
-                MinWidth = 150,
                 Margin = new Thickness(2, 2, 4, 2),
                 DisplayMemberPath = nameof(SourceCandidateOption.DisplayName),
                 Tag = sourceId,
             };
+            picker.SetBinding(
+                FrameworkElement.ToolTipProperty,
+                new System.Windows.Data.Binding("SelectedItem.DisplayName")
+                {
+                    RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.Self),
+                });
 
             var indexInSource = -1;
             for (var c = 0; c < candidates.Count; c++)
