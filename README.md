@@ -66,6 +66,11 @@ resolved from the registry.
 - [x] Lyrics: LRCLib lookup (free) written to the lyrics tag - synced LRC
       when available, plain text otherwise; per-track skip checkbox also
       honored
+- [x] Storefront selection moved to settings.json with an automatic sweep
+      of the remaining storefronts when a track ID is not found anywhere
+- [x] v3 UI (WPF): dark, workspace-first redesign - all configuration in a
+      Settings dialog, resizable track list / detail split, collapsible log
+      drawer (in progress; WinForms kept until parity)
 - [ ] Candidate quality: MusicBrainz track/disc numbers (needs release lookup), genre via `/recording/{mbid}`
 - [ ] CI workflow (build + test on windows-latest)
 - [ ] Release packaging (self-contained single-file exe)

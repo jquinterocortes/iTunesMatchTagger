@@ -14,7 +14,7 @@ Instructions for AI coding agents working in this repository.
 | Path | What it is |
 |---|---|
 | `src/itunes-match-tagger/` | Pristine upstream snapshot (SVN r6, 2012). **Frozen** — commit fixes there only to correct import mistakes. |
-| `src/v2/` | Modern rewrite (.NET 10 WinForms). All new work happens here. |
+| `src/v2/` | Modern rewrite (.NET 10). All new work happens here. |
 
 ## v1 legacy (`src/itunes-match-tagger`) — read before touching
 
@@ -29,7 +29,7 @@ Instructions for AI coding agents working in this repository.
 
 ## v2 (`src/v2`)
 
-- .NET 10, SDK-style, three projects in `src/v2/iTunesMatchTaggerV2.slnx`
+- .NET 10, SDK-style, four projects in `src/v2/iTunesMatchTaggerV2.slnx`
   (**note the `.slnx` extension** - the .NET 10 SDK's XML solution format):
   ```
   dotnet build src/v2/iTunesMatchTaggerV2.slnx
@@ -40,6 +40,21 @@ Instructions for AI coding agents working in this repository.
   (`ComTrack` COM-backed, `FileTrack` TagLib#-backed), `Fields/` the
   `TrackField` catalog, `ITunes/` the dynamic COM client, `Settings/` JSON
   user settings.
+- `src/iTunesMatchTagger.Wpf` (net10.0-windows, WPF) — **the active v3 UI**
+  and where all UI work happens now. Dark theme defined once in
+  `Themes/Dark.xaml` (brush palette + control styles). MVVM:
+  `ViewModels/MainViewModel.cs` (commands, log, update loop),
+  `ViewModels/TrackRowViewModel.cs` (WinForms TrackRow port; artwork is
+  `byte[]`, decoded to `BitmapImage` on demand),
+  `Services/TrackLookupService.cs` (Apple lookup across configured
+  storefronts with the automatic sweep of remaining storefronts, source
+  fallback chain, artwork previews). Configuration lives in a
+  `SettingsWindow` dialog (sources + Discogs token, options, storefront
+  codes as comma-separated text, field masks) — the main window holds only
+  the track list, the detail comparison grid and a collapsible log drawer.
+  `MainWindow.xaml.cs` keeps only thin glue: selection -> detail, candidate
+  picker, artwork strip, filter, log toggle. Do not reintroduce
+  configuration panels into the main window.
 - `src/iTunesMatchTagger.App` (net10.0-windows, WinForms): `MainForm.cs`
   builds the UI **in code** - there are no Designer files; `TrackRow` /
   `OptionRow` are the grid row models.
