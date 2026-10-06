@@ -42,6 +42,7 @@ public sealed class MainForm : Form
 
     private readonly ITunesComClient _itunes = new();
     private readonly ITunesSearchClient _search = new();
+    private readonly LyricsClient _lyrics = new();
     private readonly HttpClient _artworkHttp = new();
     private readonly List<TrackRow> _rows = [];
     private readonly BindingList<OptionRow> _options = [];
@@ -53,6 +54,7 @@ public sealed class MainForm : Form
     private CheckedListBox _countries = new();
     private CheckedListBox _sourcesList = new();
     private CheckBox _alwaysQueryAll = new();
+    private CheckBox _includeLyrics = new();
     private TextBox _discogsToken = new();
     private ComboBox _candidatePicker = new();
     private DataGridView _optionsGrid = new();
@@ -595,6 +597,43 @@ public sealed class MainForm : Form
             : $"Found on {active.SourceId} - {row.Candidates.Count} candidate(s), pick one in the detail panel";
     }
 
+    /// <summary>
+    /// Looks up lyrics on LRCLib using the proposed (or current) tags and
+    /// writes them with synced LRC preferred over plain text (Apple's
+    /// syllable-level karaoke text is not publicly available).
+    /// Returns true when lyrics were written.
+    /// </summary>
+    private async Task<bool> WriteLyricsIfNeededAsync(TrackRow row)
+    {
+        var title = row.GetProposed("trackName") ?? row.GetCurrent("trackName");
+        var artist = row.GetProposed("artistName") ?? row.GetCurrent("artistName");
+        var album = row.GetProposed("collectionName") ?? row.GetCurrent("collectionName");
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))
+        {
+            LogDebug($"No tags to look up lyrics for: {row.File}");
+            return false;
+        }
+
+        var lyrics = await _lyrics.LookupAsync(artist, title, album, row.Track.DurationMs, CancellationToken.None).ConfigureAwait(true);
+        if (lyrics is null)
+        {
+            LogDebug($"No lyrics found: {row.File}");
+            return false;
+        }
+
+        if (lyrics.IsEmpty)
+        {
+            LogDebug($"Instrumental track, nothing to write: {row.File}");
+            return false;
+        }
+
+        var text = lyrics.Best!;
+        await Task.Run(() => row.Track.WriteLyrics(text)).ConfigureAwait(true);
+        var lineCount = text.Count(static l => l == '\n') + 1;
+        Log($"Lyrics ({(lyrics.Synced is null ? "plain" : "synced LRC")}, {lineCount} lines, LRCLib #{lyrics.TrackId}) -> {row.File}");
+        return true;
+    }
+
     // ------------------------------------------------------------------
     // 3. Update tracks
     // ------------------------------------------------------------------
@@ -710,9 +749,22 @@ public sealed class MainForm : Form
                     Log($"Unable to write artwork for '{row.File}': {ex.Message}", LogSeverity.Error);
                 }
 
-                var written = fieldsWritten + (artworkWritten ? 1 : 0);
+                var lyricsWritten = false;
+                if (_includeLyrics.Checked)
+                {
+                    try
+                    {
+                        lyricsWritten = await WriteLyricsIfNeededAsync(row).ConfigureAwait(true);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Unable to write lyrics for '{row.File}': {ex.Message}", LogSeverity.Error);
+                    }
+                }
+
+                var written = fieldsWritten + (artworkWritten ? 1 : 0) + (lyricsWritten ? 1 : 0);
                 row.SetStatus(
-                    written > 0 ? $"Updated ({written} field(s))" : "Nothing to update",
+                    written > 0 ? $"Updated ({written} change(s))" : "Nothing to update",
                     written > 0 ? StatusKind.Success : StatusKind.Warning);
 
                 // re-read the current values so the comparison shows the result
@@ -1442,6 +1494,13 @@ public sealed class MainForm : Form
             AutoSize = false,
             Height = 26,
         };
+        _includeLyrics = new CheckBox
+        {
+            Text = "Include lyrics from LRCLib (synced LRC when available, else plain text)",
+            Dock = DockStyle.Bottom,
+            AutoSize = false,
+            Height = 26,
+        };
 
         var sourcesHint = new Label
         {
@@ -1453,6 +1512,7 @@ public sealed class MainForm : Form
 
         sourcesGroup.Controls.Add(_sourcesList);
         sourcesGroup.Controls.Add(_alwaysQueryAll);
+        sourcesGroup.Controls.Add(_includeLyrics);
         sourcesGroup.Controls.Add(sourcesBottom);
         sourcesGroup.Controls.Add(sourcesHint);
 
@@ -1904,6 +1964,7 @@ public sealed class MainForm : Form
 
         _discogsToken.Text = settings.Sources.FirstOrDefault(static s => s.Id == TagSources.Discogs)?.Token ?? string.Empty;
         _alwaysQueryAll.Checked = settings.QueryAllSources;
+        _includeLyrics.Checked = settings.IncludeLyrics;
     }
 
     private void SaveSettings()
@@ -1912,6 +1973,7 @@ public sealed class MainForm : Form
         {
             SelectedCountries = [.. CheckedCountries()],
             QueryAllSources = _alwaysQueryAll.Checked,
+            IncludeLyrics = _includeLyrics.Checked,
             Sources =
             [
                 new TagSourceSettings { Id = TagSources.ITunes, Enabled = true, Token = null },

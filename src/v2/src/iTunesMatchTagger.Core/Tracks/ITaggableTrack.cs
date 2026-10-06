@@ -35,4 +35,10 @@ public interface ITaggableTrack
 
     /// <summary>Replaces the embedded album artwork with the given image bytes.</summary>
     void WriteArtwork(byte[] imageBytes);
+
+    /// <summary>Track length in milliseconds, when the back end can read it.</summary>
+    int? DurationMs => null;
+
+    /// <summary>Replaces the lyrics tag (plain text or synced LRC text).</summary>
+    void WriteLyrics(string lyrics);
 }

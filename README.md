@@ -65,6 +65,9 @@ resolved from the registry.
       picker and per-field "Use" checkboxes in the detail panel
 - [x] Force re-scan: delete + re-add tracks from the library (files kept) so
       Apple's match engine re-evaluates uploaded tracks
+- [x] Lyrics: LRCLib lookup (free) written to the lyrics tag - synced LRC
+      when available, plain text otherwise; per-track skip checkbox also
+      honored
 - [ ] Candidate quality: MusicBrainz track/disc numbers (needs release lookup), genre via `/recording/{mbid}`
 - [ ] CI workflow (build + test on windows-latest)
 - [ ] Release packaging (self-contained single-file exe)

@@ -22,6 +22,9 @@ public sealed class AppSettings
     /// <summary>Query every enabled tag source on every lookup, even when Apple matches (slower, richer comparison).</summary>
     public bool QueryAllSources { get; set; }
 
+    /// <summary>Fetch and write lyrics from LRCLib during "3. Update tracks" (synced LRC when available, plain text otherwise).</summary>
+    public bool IncludeLyrics { get; set; }
+
     /// <summary>Per-source options for the tag-source fallback chain. The list is the fallback order after Apple.</summary>
     public List<TagSourceSettings> Sources { get; set; } = [.. TagSourceCatalog.All
         .Where(static s => s.Id != TagSources.ITunes)

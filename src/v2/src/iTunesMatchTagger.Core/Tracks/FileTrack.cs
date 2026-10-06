@@ -20,6 +20,29 @@ public sealed class FileTrack : ITaggableTrack
 
     public bool IsMatched => TrackId > 0;
 
+    public int? DurationMs
+    {
+        get
+        {
+            try
+            {
+                using var file = TagLib.File.Create(Location);
+                return (int?)file.Properties.Duration.TotalMilliseconds;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+    }
+
+    public void WriteLyrics(string lyrics)
+    {
+        using var file = TagLib.File.Create(Location);
+        file.Tag.Lyrics = lyrics;
+        file.Save();
+    }
+
     public object? ReadField(TrackField field)
     {
         if (field.GetFromFileTag is null)

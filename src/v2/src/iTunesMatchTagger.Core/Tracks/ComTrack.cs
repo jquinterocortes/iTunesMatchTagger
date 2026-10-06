@@ -39,6 +39,53 @@ public sealed class ComTrack : ITaggableTrack
     /// </summary>
     public bool IsMatched => TrackId > 0;
 
+    /// <summary>iTunes reports the length as a "m:ss"/"h:mm:ss" string.</summary>
+    public int? DurationMs
+    {
+        get
+        {
+            try
+            {
+                return ParsePackedTime((string?)Raw.Time);
+            }
+            catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+            {
+                return null;
+            }
+        }
+    }
+
+    public void WriteLyrics(string lyrics) => Raw.Lyrics = lyrics;
+
+    private static int? ParsePackedTime(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var parts = text.Split(':');
+        if (parts.Length is < 2 or > 3)
+        {
+            return null;
+        }
+
+        try
+        {
+            var seconds = parts.Length == 3
+                ? int.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture) * 3600
+                  + int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture) * 60
+                  + int.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture)
+                : int.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture) * 60
+                  + int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture);
+            return seconds * 1000;
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
     public object? ReadField(TrackField field)
     {
         try

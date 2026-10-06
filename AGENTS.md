@@ -81,6 +81,12 @@ Instructions for AI coding agents working in this repository.
   match; expect playlist re-assignment to be needed for playlists that held
   those tracks. `TrackRow.ReplaceTrack` swaps the backing track and clears
   all lookup state.
+- Lyrics (optional, "Include lyrics from LRCLib" checkbox): fetched from
+  lrclib.net during the update step via `Sources/LyricsClient.cs`, written
+  through `ITaggableTrack.WriteLyrics` (COM `track.Lyrics` / TagLib#
+  `tag.Lyrics`). Synced LRC text is preferred over plain text; Apple's
+  syllable-level timed text is not publicly available, so LRCLib's
+  line-level LRC is the best synced option.
 - UI-thread discipline: COM access and `TrackRow` mutations happen only on
   the UI thread; background lookups report through `IProgress<T>`. Do not
   raise `TrackRow.PropertyChanged` from worker threads (DataGridView is
