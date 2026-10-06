@@ -607,25 +607,26 @@ public sealed class MainForm : Form
     /// </summary>
     private async Task<bool> WriteLyricsIfNeededAsync(TrackRow row)
     {
-        var title = row.GetProposed("trackName") ?? row.GetCurrent("trackName");
-        var artist = row.GetProposed("artistName") ?? row.GetCurrent("artistName");
-        var album = row.GetProposed("collectionName") ?? row.GetCurrent("collectionName");
+        // an empty candidate value ("") must not shadow the current tag
+        var title = FirstNonEmpty(row.GetProposed("trackName"), row.GetCurrent("trackName"));
+        var artist = FirstNonEmpty(row.GetProposed("artistName"), row.GetCurrent("artistName"));
+        var album = FirstNonEmpty(row.GetProposed("collectionName"), row.GetCurrent("collectionName"));
         if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))
         {
-            LogDebug($"No tags to look up lyrics for: {row.File}");
+            Log($"No tags to look up lyrics for: {row.File}", LogSeverity.Warning);
             return false;
         }
 
         var lyrics = await _lyrics.LookupAsync(artist, title, album, row.Track.DurationMs, CancellationToken.None).ConfigureAwait(true);
         if (lyrics is null)
         {
-            LogDebug($"No lyrics found: {row.File}");
+            Log($"No lyrics found on LRCLib: {row.File}", LogSeverity.Warning);
             return false;
         }
 
         if (lyrics.IsEmpty)
         {
-            LogDebug($"Instrumental track, nothing to write: {row.File}");
+            Log($"Instrumental track, nothing to write: {row.File}");
             return false;
         }
 
@@ -635,6 +636,9 @@ public sealed class MainForm : Form
         Log($"Lyrics ({(lyrics.Synced is null ? "plain" : "synced LRC")}, {lineCount} lines, LRCLib #{lyrics.TrackId}) -> {row.File}");
         return true;
     }
+
+    private static string? FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(static v => !string.IsNullOrWhiteSpace(v));
 
     // ------------------------------------------------------------------
     // 3. Update tracks
@@ -666,6 +670,8 @@ public sealed class MainForm : Form
         _progress.Value = 0;
         _progress.Maximum = _rows.Count;
         Log("Update started.");
+        var lyricsWrittenCount = 0;
+        var lyricsMissedCount = 0;
 
         try
         {
@@ -757,9 +763,18 @@ public sealed class MainForm : Form
                     try
                     {
                         lyricsWritten = await WriteLyricsIfNeededAsync(row).ConfigureAwait(true);
+                        if (lyricsWritten)
+                        {
+                            lyricsWrittenCount++;
+                        }
+                        else
+                        {
+                            lyricsMissedCount++;
+                        }
                     }
                     catch (Exception ex)
                     {
+                        lyricsMissedCount++;
                         Log($"Unable to write lyrics for '{row.File}': {ex.Message}", LogSeverity.Error);
                     }
                 }
@@ -776,6 +791,11 @@ public sealed class MainForm : Form
                 }
 
                 _progress.PerformStep();
+            }
+
+            if (_includeLyrics.Checked)
+            {
+                Log($"Lyrics summary: {lyricsWrittenCount} written, {lyricsMissedCount} without match/instrumental/without tags.");
             }
 
             Log("Update complete.");

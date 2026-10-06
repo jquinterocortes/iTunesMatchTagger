@@ -39,13 +39,19 @@ public sealed class ComTrack : ITaggableTrack
     /// </summary>
     public bool IsMatched => TrackId > 0;
 
-    /// <summary>iTunes reports the length as a "m:ss"/"h:mm:ss" string.</summary>
+    /// <summary>iTunes exposes the duration as seconds (numeric) and Time as a formatted string; prefer the number.</summary>
     public int? DurationMs
     {
         get
         {
             try
             {
+                var seconds = (int)Raw.Duration;
+                if (seconds > 0)
+                {
+                    return seconds * 1000;
+                }
+
                 return ParsePackedTime((string?)Raw.Time);
             }
             catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
