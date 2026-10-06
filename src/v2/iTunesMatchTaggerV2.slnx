@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/iTunesMatchTagger.App/iTunesMatchTagger.App.csproj" />
     <Project Path="src/iTunesMatchTagger.Core/iTunesMatchTagger.Core.csproj" />
+    <Project Path="src/iTunesMatchTagger.Wpf/iTunesMatchTagger.Wpf.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/iTunesMatchTagger.Core.Tests/iTunesMatchTagger.Core.Tests.csproj" />

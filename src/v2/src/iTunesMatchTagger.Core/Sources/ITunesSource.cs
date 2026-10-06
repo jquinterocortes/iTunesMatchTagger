@@ -70,6 +70,9 @@ public sealed class ITunesSource : ITagSource
 
     private static TagCandidate ToCandidate(ITunesLookupResult r) => FromLookupResult(r);
 
+    /// <summary>Exposes the mapping so other UI layers can promote a lookup hit into a candidate.</summary>
+    public static TagCandidate CandidateFromLookupResult(ITunesLookupResult r) => FromLookupResult(r);
+
     public void Dispose()
     {
         if (_ownsClient)
