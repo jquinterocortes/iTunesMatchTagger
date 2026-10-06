@@ -157,7 +157,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task GetTracksAsync()
     {
-        if (!EnsureReady())
+        if (_busy)
         {
             return;
         }
@@ -191,6 +191,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private async Task LoadFolderAsync()
     {
+        if (_busy)
+        {
+            return;
+        }
+
         var dialog = new Microsoft.Win32.OpenFolderDialog
         {
             Title = "Select the folder that contains your m4a / mp3 files",
