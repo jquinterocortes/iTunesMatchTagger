@@ -435,7 +435,8 @@ public sealed class MainForm : Form
                 foreach (var country in countries)
                 {
                     var results = await _search.SearchAsync(term, country, cancellationToken).ConfigureAwait(false);
-                    var first = results.FirstOrDefault(static r => r.Kind is null or "song");
+                    var first = results.FirstOrDefault(static r =>
+                        (r.Kind is null or "song") && !string.IsNullOrWhiteSpace(r.TrackName));
                     if (first is not null)
                     {
                         LogDebug($"Term '{term}' found in {country}: {row.File} (catalog Track ID {first.TrackId})");

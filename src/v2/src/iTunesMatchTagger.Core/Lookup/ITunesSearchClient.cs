@@ -43,11 +43,13 @@ public sealed class ITunesSearchClient : IDisposable
     /// Free-text search (artist/album/title) in the given storefront, via
     /// the /search endpoint (the /lookup endpoint only accepts ids).
     /// Used by standalone mode and as a fallback when an embedded Track ID
-    /// is no longer listed in the catalog.
+    /// is no longer listed in the catalog. Restricted to music songs -
+    /// without it the API ranks across ALL media and an audiobook by a
+    /// popular artist outranks the actual song being sought.
     /// </summary>
     public async Task<List<ITunesLookupResult>> SearchAsync(string term, string country, CancellationToken cancellationToken = default)
     {
-        return await QueryAsync($"{SearchUrl}?term={Uri.EscapeDataString(term)}&country={country}&limit=5", cancellationToken).ConfigureAwait(false);
+        return await QueryAsync($"{SearchUrl}?term={Uri.EscapeDataString(term)}&country={country}&media=music&entity=song&limit=5", cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
