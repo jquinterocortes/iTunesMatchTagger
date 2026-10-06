@@ -630,6 +630,14 @@ public sealed class MainForm : Form
         {
             foreach (var row in _rows)
             {
+                if (row.SkipUpdate)
+                {
+                    row.SetStatus("Excluded by the user's checkbox", StatusKind.Neutral);
+                    LogDebug($"Skipped (excluded): {row.File}");
+                    _progress.PerformStep();
+                    continue;
+                }
+
                 var writes = new List<KeyValuePair<TrackField, object?>>();
                 string? artworkValue = null;
                 foreach (var option in active)
@@ -959,9 +967,15 @@ public sealed class MainForm : Form
         _currentArtworkStripPic.Image = row.CurrentArtworkImage;
         RefreshArtworkStrip(row);
 
-        _statusLabel.Text = row.StatusMessage.Length == 0
+        var text = row.StatusMessage.Length == 0
             ? "No lookup yet - click \"2. Lookup tracks\"."
             : row.StatusMessage;
+        if (row.SkipUpdate)
+        {
+            text += "   [excluded from update]";
+        }
+
+        _statusLabel.Text = text;
         _statusLabel.ForeColor = row.StatusSeverity switch
         {
             StatusKind.Success => Color.FromArgb(0, 128, 0),
@@ -1140,6 +1154,11 @@ public sealed class MainForm : Form
 
     private bool WillChangeSomething(TrackRow row)
     {
+        if (row.SkipUpdate)
+        {
+            return false; // excluded tracks never show the change dot
+        }
+
         foreach (var option in _options.Where(static o => o.Update))
         {
             if (option.Overwrite && !string.IsNullOrEmpty(option.OverwriteValue))
@@ -1168,6 +1187,11 @@ public sealed class MainForm : Form
         var selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
         var backColor = selected ? SystemColors.Highlight : SystemColors.Window;
         var foreColor = selected ? SystemColors.HighlightText : SystemColors.WindowText;
+        if (row.SkipUpdate)
+        {
+            // excluded tracks read as disabled
+            foreColor = selected ? Color.FromArgb(214, 214, 214) : SystemColors.GrayText;
+        }
 
         using (var backBrush = new SolidBrush(backColor))
         {
@@ -1198,8 +1222,8 @@ public sealed class MainForm : Form
         }
 
         var textLeft = thumbRect.Right + 8;
-        var textWidth = Math.Max(10, e.Bounds.Width - textLeft - 14);
-        using (var nameFont = new Font("Segoe UI", 9.5f, FontStyle.Bold))
+        var textWidth = Math.Max(10, e.Bounds.Width - textLeft - 62); // room for the skip checkbox + change dot
+        using (var nameFont = new Font("Segoe UI", 9.5f, row.SkipUpdate ? FontStyle.Strikeout : FontStyle.Bold))
         {
             var title = row.GetCurrent("trackName");
             TextRenderer.DrawText(e.Graphics,
@@ -1230,12 +1254,62 @@ public sealed class MainForm : Form
         if (WillChangeSomething(row))
         {
             using var dotBrush = new SolidBrush(Color.OrangeRed);
-            e.Graphics.FillEllipse(dotBrush, e.Bounds.Right - 16, e.Bounds.Top + 9, 9, 9);
+            e.Graphics.FillEllipse(dotBrush, SkipRect(e.Bounds).Left - 14, e.Bounds.Top + 9, 9, 9);
         }
+
+        DrawSkipCheckbox(e, row, skipRect: SkipRect(e.Bounds));
 
         if ((e.State & DrawItemState.Focus) == DrawItemState.Focus)
         {
             e.DrawFocusRectangle();
+        }
+    }
+
+    /// <summary>Location of the per-row skip-update checkbox (top right).</summary>
+    private static Rectangle SkipRect(Rectangle itemBounds) => new(itemBounds.Right - 24, itemBounds.Top + 5, 16, 16);
+
+    private static void DrawSkipCheckbox(DrawItemEventArgs e, TrackRow row, Rectangle skipRect)
+    {
+        e.Graphics.FillRectangle(Brushes.White, skipRect);
+        using var borderPen = new Pen(row.SkipUpdate ? Color.FromArgb(192, 0, 0) : Color.FromArgb(200, 200, 200));
+        e.Graphics.DrawRectangle(borderPen, skipRect);
+
+        if (row.SkipUpdate)
+        {
+            using var crossPen = new Pen(Color.FromArgb(192, 0, 0), 2f);
+            e.Graphics.DrawLine(crossPen, skipRect.Left + 3, skipRect.Top + 3, skipRect.Right - 4, skipRect.Bottom - 4);
+            e.Graphics.DrawLine(crossPen, skipRect.Right - 4, skipRect.Top + 3, skipRect.Left + 3, skipRect.Bottom - 4);
+        }
+    }
+
+    private void TrackList_MouseDown(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left)
+        {
+            return;
+        }
+
+        var index = _trackList.IndexFromPoint(e.Location);
+        if (index < 0 || index >= _rows.Count)
+        {
+            return;
+        }
+
+        if (!SkipRect(_trackList.GetItemRectangle(index)).Contains(e.Location))
+        {
+            return;
+        }
+
+        var row = _rows[index];
+        row.SkipUpdate = !row.SkipUpdate;
+        _trackList.Invalidate();
+        Log(row.SkipUpdate
+            ? $"Excluded from update: {row.File}"
+            : $"Included back: {row.File}");
+
+        if (ReferenceEquals(SelectedRow(), row))
+        {
+            FillDetail(row);
         }
     }
 
@@ -1457,7 +1531,10 @@ public sealed class MainForm : Form
             .GetProperty("DoubleBuffered", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(_trackList, true);
         _trackList.DrawItem += TrackList_DrawItem;
+        _trackList.MouseDown += TrackList_MouseDown;
         _trackList.SelectedIndexChanged += TrackList_SelectedIndexChanged;
+        var listTooltip = new ToolTip();
+        listTooltip.SetToolTip(_trackList, "The box at the top-right of a track excludes it from '3. Update tracks' (click to toggle).");
         _splitter.Panel1.Controls.Add(_trackList);
 
         // Row 0: status ("Found...") with the Result picker docked at its

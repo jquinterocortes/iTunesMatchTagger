@@ -55,6 +55,22 @@ public sealed class TrackRow : INotifyPropertyChanged
 
     public string File => Track.Location ?? "[unknown]";
 
+    private bool _skipUpdate;
+
+    /// <summary>User exclusion from "3. Update tracks" (per-track checkbox in the list).</summary>
+    public bool SkipUpdate
+    {
+        get => _skipUpdate;
+        set
+        {
+            if (_skipUpdate != value)
+            {
+                _skipUpdate = value;
+                Raise();
+            }
+        }
+    }
+
     public string TrackIdText => Track.TrackId > 0 ? Track.TrackId.ToString() : string.Empty;
 
     public string StatusMessage => _statusMessage;
