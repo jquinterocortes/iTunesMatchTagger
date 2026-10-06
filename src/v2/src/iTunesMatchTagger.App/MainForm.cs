@@ -1327,6 +1327,7 @@ public sealed class MainForm : Form
             IntegralHeight = false,
             DisplayMember = nameof(TagSourceInfo.DisplayName),
         };
+        _sourcesList.ItemCheck += SourcesList_ItemCheck;
         foreach (var source in TagSourceCatalog.All.Where(static s => s.Id != TagSources.ITunes))
         {
             _sourcesList.Items.Add(source, false);
@@ -1346,6 +1347,7 @@ public sealed class MainForm : Form
         _discogsToken = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
         var tokenTip = new ToolTip();
         tokenTip.SetToolTip(_discogsToken, "Personal access token from discogs.com/settings/developers");
+        _discogsToken.Validated += DiscogsToken_Validated;
         sourcesBottom.Controls.Add(_discogsToken, 1, 0);
 
         _alwaysQueryAll = new CheckBox
@@ -1355,6 +1357,7 @@ public sealed class MainForm : Form
             AutoSize = false,
             Height = 26,
         };
+        _alwaysQueryAll.CheckedChanged += SettingsCheckedChanged;
         _includeLyrics = new CheckBox
         {
             Text = "Include lyrics from LRCLib (synced LRC when available, else plain text)",
@@ -1362,6 +1365,7 @@ public sealed class MainForm : Form
             AutoSize = false,
             Height = 26,
         };
+        _includeLyrics.CheckedChanged += SettingsCheckedChanged;
 
         var sourcesHint = new Label
         {
@@ -1814,6 +1818,19 @@ public sealed class MainForm : Form
         _includeLyrics.Checked = settings.IncludeLyrics;
     }
 
+    /// <summary>Defers the save: CheckedItems is not updated until the check applies.</summary>
+    private void SourcesList_ItemCheck(object? sender, ItemCheckEventArgs e)
+    {
+        if (IsHandleCreated)
+        {
+            BeginInvoke(new Action(SaveSettings));
+        }
+    }
+
+    private void SettingsCheckedChanged(object? sender, EventArgs e) => SaveSettings();
+
+    private void DiscogsToken_Validated(object? sender, EventArgs e) => SaveSettings();
+
     private void SaveSettings()
     {
         // SelectedCountries are hand-edited in settings.json; the UI never
@@ -1821,16 +1838,29 @@ public sealed class MainForm : Form
         var settings = _settings;
         settings.QueryAllSources = _alwaysQueryAll.Checked;
         settings.IncludeLyrics = _includeLyrics.Checked;
-        settings.Sources =
+        List<TagSourceSettings> sources =
         [
-            new TagSourceSettings { Id = TagSources.ITunes, Enabled = true, Token = null },
+            new() { Id = TagSources.ITunes, Enabled = true, Token = null },
             .. CheckedSourceIds().Select(static id => new TagSourceSettings { Id = id, Enabled = true }),
         ];
 
         if (_discogsToken.Text.Trim() is { Length: > 0 } token)
         {
-            settings.Sources.Add(new TagSourceSettings { Id = TagSources.Discogs, Enabled = CheckedSourceIds().Contains(TagSources.Discogs), Token = token });
+            // One single Discogs entry - the token goes into the enabled
+            // entry when the source is checked, otherwise a disabled entry
+            // just preserves the token for the next session.
+            var discogs = sources.FirstOrDefault(static s => s.Id == TagSources.Discogs);
+            if (discogs is null)
+            {
+                sources.Add(new TagSourceSettings { Id = TagSources.Discogs, Enabled = false, Token = token });
+            }
+            else
+            {
+                discogs.Token = token;
+            }
         }
+
+        settings.Sources = sources;
 
         foreach (var option in _options)
         {
