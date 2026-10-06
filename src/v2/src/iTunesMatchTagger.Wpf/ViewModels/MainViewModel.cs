@@ -588,7 +588,20 @@ public sealed class MainViewModel : INotifyPropertyChanged
                     }
 
                     writes.Add(new KeyValuePair<TrackField, object?>(option.Field, value));
+                    Log($"WRITE {option.Field.DisplayName} = '{value}' -> {row.File}", StatusKind.Neutral);
                 }
+
+                if (row.Track.Location is null)
+                {
+                    row.SetStatus("Track is not downloaded (iCloud only) - cannot update", StatusKind.Error);
+                    Log($"SKIP update, no local file: {row.File}", StatusKind.Warning);
+                    SetProgress(ProgressValue + 1, ProgressMaximum);
+                    continue;
+                }
+
+                // heartbeat: is the COM backing still alive before writing?
+                var preWrite = row.Track.ReadField(TrackFields.All[0]);
+                Log($"WRITE pre-check '{TrackFields.All[0].DisplayName}' currently '{preWrite}' -> {row.File}", StatusKind.Neutral);
 
                 var fieldsWritten = 0;
                 try
@@ -653,9 +666,22 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 }
 
                 var written = fieldsWritten + (artworkWritten ? 1 : 0) + (lyricsWritten ? 1 : 0);
-                row.SetStatus(
-                    written > 0 ? $"Updated ({written} change(s))" : "Nothing to update",
-                    written > 0 ? StatusKind.Success : StatusKind.Warning);
+                if (written > 0)
+                {
+                    row.SetStatus($"Updated ({written} change(s))", StatusKind.Success);
+                }
+                else if (!row.LookupSuccess)
+                {
+                    row.SetStatus("No lookup proposal for this track (run 2. Lookup)", StatusKind.Warning);
+                }
+                else if (writes.Count == 0)
+                {
+                    row.SetStatus("Tags already match the candidate", StatusKind.Success);
+                }
+                else
+                {
+                    row.SetStatus($"Nothing written - check the Log ({writes.Count} field(s) attempted)", StatusKind.Error);
+                }
 
                 // re-read the current values so the comparison shows the result
                 row.RefreshCurrentValues();
