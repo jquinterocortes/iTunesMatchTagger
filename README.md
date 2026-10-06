@@ -63,8 +63,9 @@ resolved from the registry.
 - [x] Additional tag sources: MusicBrainz, Discogs and Deezer adapters with a
       normalized `TagCandidate`; automatic fallback (Apple first), candidate
       picker and per-field "Use" checkboxes in the detail panel
-- [x] Force re-scan: delete + re-add tracks from the library (files kept) so
-      Apple's match engine re-evaluates uploaded tracks
+- [x] Force re-scan: delete + re-add tracks from the library so Apple's
+      match engine re-evaluates uploaded tracks, with the file protected in
+      memory and playlist memberships restored (or re-targeted via a picker)
 - [x] Lyrics: LRCLib lookup (free) written to the lyrics tag - synced LRC
       when available, plain text otherwise; per-track skip checkbox also
       honored

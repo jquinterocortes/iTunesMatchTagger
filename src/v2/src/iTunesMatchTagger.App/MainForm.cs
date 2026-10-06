@@ -74,6 +74,7 @@ public sealed class MainForm : Form
     private Button _btnUpdate = new();
     private Button _btnLoadFolder = new();
     private Button _btnRescan = new();
+    private ComboBox _playlistPicker = new();
     private Button _btnInfo = new();
 
     public MainForm()
@@ -807,10 +808,12 @@ public sealed class MainForm : Form
     // ------------------------------------------------------------------
     // 5. Force re-scan: delete from the library + re-add the file so
     //    Apple's match engine re-evaluates the track (no COM API exists
-    //    for that; this is the one supported trick).
+    //    for that; this is the supported trick). The file bytes are kept
+    //    in memory first because the removal may delete the file, and the
+    //    playlist memberships are restored (or re-targeted) afterwards.
     // ------------------------------------------------------------------
 
-    private void BtnRescan_Click(object? sender, EventArgs e)
+    private async void BtnRescan_Click(object? sender, EventArgs e)
     {
         if (!EnsureNotBusy())
         {
@@ -828,19 +831,23 @@ public sealed class MainForm : Form
         }
 
         var confirmed = MessageBox.Show(this,
-            $"Re-scan {rescannable.Count} track(s)?\n\n" +
-            "This removes them from the iTunes library (the files stay on disk) and re-adds them, so Apple's match engine evaluates them again.\n\n" +
-            "Playlist membership outside the library may need to be re-assigned manually.",
+            $"Force re-scan {rescannable.Count} track(s)?\n\n" +
+            "The tracks are removed from the iTunes library and their files are re-added, so Apple's match engine evaluates them again.\n" +
+            "For every track the app keeps a copy of the file bytes in memory first, so the file is restored even if the removal deletes it.\n\n" +
+            "Playlist target:\n" +
+            $"- '{_playlistPicker.SelectedItem as string ?? AutomaticPlaylistsOption}' (tracks are re-added to their playlists afterwards).\n\n" +
+            "Continue?",
             Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
         if (confirmed != DialogResult.Yes)
         {
             return;
         }
 
+        var restoreMode = _playlistPicker.SelectedItem as string ?? AutomaticPlaylistsOption;
         SetBusy(true);
         _progress.Value = 0;
         _progress.Maximum = rescannable.Count;
-        Log($"Re-scan started: {rescannable.Count} track(s). Files stay on disk.");
+        Log($"Force re-scan started: {rescannable.Count} track(s), playlists: '{restoreMode}'.");
 
         try
         {
@@ -852,29 +859,97 @@ public sealed class MainForm : Form
 
                 try
                 {
+                    // Step 1: discover playlists to restore BEFORE anything changes.
+                    var originalPlaylists = _itunes.GetTrackPlaylistNames(oldTrack);
+                    var targetPlaylists = new List<string>(originalPlaylists);
+                    if (restoreMode is not AutomaticPlaylistsOption and not NoPlaylistOption &&
+                        !targetPlaylists.Contains(restoreMode, StringComparer.OrdinalIgnoreCase))
+                    {
+                        targetPlaylists.Add(restoreMode);
+                    }
+
+                    // Step 2: keep the file bytes - iTunes may delete/trash the
+                    // file together with the library entry.
+                    byte[]? fileBytes = null;
+                    var fileSize = 0L;
+                    if (File.Exists(path))
+                    {
+                        fileBytes = await File.ReadAllBytesAsync(path).ConfigureAwait(true);
+                        fileSize = fileBytes.Length;
+                    }
+                    else
+                    {
+                        row.SetStatus("Re-scan skipped: file not found on disk", StatusKind.Error);
+                        Log($"Re-scan skipped, file missing: {path}", LogSeverity.Error);
+                        continue;
+                    }
+
+                    // Step 3: remove from the library (may take the file with it).
                     _itunes.RemoveFromLibrary(oldTrack);
                     LogDebug($"Removed from library: {path}");
 
+                    // Step 4: restore the file at the same path when it is gone.
+                    if (!File.Exists(path))
+                    {
+                        await File.WriteAllBytesAsync(path, fileBytes).ConfigureAwait(true);
+                        LogDebug($"File was deleted by iTunes; recreated it: {path} ({fileSize} bytes)");
+                    }
+
+                    fileBytes = null; // bytes back on disk; release the copy
+
+                    // Step 5: re-import (this triggers the scan/new Match evaluation).
                     var reAdded = _itunes.AddFileToLibrary(path);
                     if (reAdded is null)
                     {
-                        row.SetStatus("Re-scan failed: iTunes did not re-add the file", StatusKind.Error);
+                        row.SetStatus("Re-scan failed: iTunes did not re-add the file (it is still on disk)", StatusKind.Error);
                         Log($"Re-scan: iTunes did not re-add '{path}'", LogSeverity.Error);
                         continue;
+                    }
+
+                    // Step 6: bring the playlists back (smart/system ones excluded).
+                    var restored = new List<string>();
+                    var failed = new List<string>();
+                    foreach (var playlistName in targetPlaylists)
+                    {
+                        try
+                        {
+                            if (_itunes.AddTrackToPlaylist(playlistName, reAdded))
+                            {
+                                restored.Add(playlistName);
+                            }
+                            else
+                            {
+                                LogDebug($"Playlist '{playlistName}' unavailable or already had the track: {path}");
+                            }
+                        }
+                        catch (Exception ex) when (ex is COMException or RuntimeBinderException or TargetInvocationException)
+                        {
+                            failed.Add(playlistName);
+                            Log($"Could not re-add to playlist '{playlistName}' ({ex.Message}): {path}", LogSeverity.Warning);
+                        }
                     }
 
                     row.ReplaceTrack(reAdded);
 
                     var kind = DescribeKind(reAdded);
+                    var playlistSuffix = restored.Count > 0
+                        ? $", back in {restored.Count} playlist(s): {string.Join(", ", restored)}"
+                        : string.Empty;
+
                     if (reAdded.TrackId > 0)
                     {
-                        row.SetStatus($"Re-scanned: now '{kind}' (catalog ID {reAdded.TrackId})", StatusKind.Success);
-                        Log($"Re-scanned: '{kind}' with catalog ID {reAdded.TrackId}: {path}");
+                        row.SetStatus($"Re-scanned: now '{kind}' (catalog ID {reAdded.TrackId}){playlistSuffix}", StatusKind.Success);
+                        Log($"Re-scanned: '{kind}' with catalog ID {reAdded.TrackId}{playlistSuffix}: {path}");
                     }
                     else
                     {
-                        row.SetStatus($"Re-scanned: Apple is evaluating ({kind}) - check again in a few minutes", StatusKind.Warning);
-                        Log($"Re-scanned: still '{kind}', Apple is evaluating: {path}", LogSeverity.Warning);
+                        row.SetStatus($"Re-scanned: Apple is evaluating ({kind}){playlistSuffix} - check again in a few minutes", StatusKind.Warning);
+                        Log($"Re-scanned: still '{kind}', Apple is evaluating{playlistSuffix}: {path}", LogSeverity.Warning);
+                    }
+
+                    if (failed.Count > 0)
+                    {
+                        Log($"Playlists needing manual attention: {string.Join(", ", failed)}", LogSeverity.Warning);
                     }
                 }
                 catch (Exception ex) when (ex is COMException or RuntimeBinderException or TargetInvocationException)
@@ -882,9 +957,14 @@ public sealed class MainForm : Form
                     row.SetStatus($"Re-scan COM error: {ex.Message}", StatusKind.Error);
                     Log($"Re-scan failed for '{path}': {ex.Message}", LogSeverity.Error);
                 }
+                catch (IOException ex)
+                {
+                    row.SetStatus($"Re-scan file error: {ex.Message}", StatusKind.Error);
+                    Log($"Re-scan failed for '{path}': {ex.Message}", LogSeverity.Error);
+                }
             }
 
-            Log("Re-scan complete. Match status may keep changing while iTunes syncs.");
+            Log("Force re-scan complete. Match status may keep changing while iTunes syncs.");
         }
         catch (Exception ex)
         {
@@ -1911,11 +1991,20 @@ public sealed class MainForm : Form
         _btnLoadFolder.Click += BtnLoadFolder_Click;
         _btnRescan = new Button
         {
-            Text = "5. Re-scan (force match)",
+            Text = "5. Force re-scan (match)",
             AutoSize = true,
             Margin = buttonMargin,
         };
         _btnRescan.Click += BtnRescan_Click;
+        _playlistPicker = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 180,
+            Margin = new Padding(0, 12, 8, 12),
+            DropDownWidth = 260,
+        };
+        _playlistPicker.DropDown += PlaylistPicker_DropDown;
+        _playlistPicker.SelectedIndexChanged += PlaylistPicker_SelectedIndexChanged;
         _btnInfo = new Button { Text = "Info", AutoSize = true, Margin = buttonMargin };
         _btnInfo.Click += BtnInfo_Click;
         _showDebug = new CheckBox { Text = "Show debug", AutoSize = true, Margin = new Padding(12, 12, 0, 0) };
@@ -1925,10 +2014,99 @@ public sealed class MainForm : Form
         bar.Controls.Add(_btnLookup);
         bar.Controls.Add(_btnUpdate);
         bar.Controls.Add(_btnLoadFolder);
+        bar.Controls.Add(_playlistPicker);
         bar.Controls.Add(_btnRescan);
         bar.Controls.Add(_btnInfo);
         bar.Controls.Add(_showDebug);
         return bar;
+    }
+
+    /// <summary>Special picker entries (non-playlist choices).</summary>
+    private const string AutomaticPlaylistsOption = "(track's playlists)";
+    private const string NoPlaylistOption = "(library only)";
+    private const string NonePlaylistSetting = "(none)";
+
+    private string? _rememberedPlaylistName;
+
+    /// <summary>Fills the playlist picker on demand (needs a live COM connection); keeps the current selection when possible.</summary>
+    private void PlaylistPicker_DropDown(object? sender, EventArgs e)
+    {
+        var selected = _playlistPicker.SelectedItem as string;
+        var remembered = _rememberedPlaylistName;
+
+        _playlistPicker.SelectedIndexChanged -= PlaylistPicker_SelectedIndexChanged;
+        try
+        {
+            var items = new List<string> { AutomaticPlaylistsOption, NoPlaylistOption };
+            items.AddRange(GetUserPlaylistNamesSafe());
+            _playlistPicker.Items.Clear();
+            var itemArray = new object[items.Count];
+            for (var i = 0; i < items.Count; i++)
+            {
+                itemArray[i] = items[i];
+            }
+
+            _playlistPicker.Items.AddRange(itemArray);
+            _rememberedPlaylistName = null; // fresh list; selection drives persistence from now on
+
+            var target = selected ?? remembered;
+            var index = target is not null ? items.FindIndex(i => string.Equals(i, target, StringComparison.OrdinalIgnoreCase)) : 0;
+            _playlistPicker.SelectedIndex = index >= 0 ? index : 0;
+        }
+        finally
+        {
+            _playlistPicker.SelectedIndexChanged += PlaylistPicker_SelectedIndexChanged;
+        }
+    }
+
+    private IReadOnlyList<string> GetUserPlaylistNamesSafe()
+    {
+        try
+        {
+            return _itunes.GetUserPlaylistNames();
+        }
+        catch (Exception ex) when (ex is COMException or RuntimeBinderException or TargetInvocationException)
+        {
+            Log($"Could not load iTunes playlists ({ex.Message}) - automatic modes still work.", LogSeverity.Warning);
+            return [];
+        }
+    }
+
+    private void PlaylistPicker_SelectedIndexChanged(object? sender, EventArgs e) => SaveSettings();
+
+    private string? NormalizePlaylistChoice(string? choice) => choice switch
+    {
+        null or "" or AutomaticPlaylistsOption => null,
+        NoPlaylistOption => NonePlaylistSetting,
+        _ => choice,
+    };
+
+    /// <summary>"(none)" setting value maps to the library-only option.</summary>
+    private string? ResolveRememberedPlaylist(string? saved) => saved switch
+    {
+        null or "" => null,
+        NonePlaylistSetting => NoPlaylistOption,
+        _ => saved,
+    };
+
+    private void SeedPlaylistPicker()
+    {
+        var remembered = ResolveRememberedPlaylist(_rememberedPlaylistName);
+        var items = remembered is not null && remembered != AutomaticPlaylistsOption
+            ? new List<string> { AutomaticPlaylistsOption, NoPlaylistOption, remembered }
+            : new List<string> { AutomaticPlaylistsOption, NoPlaylistOption };
+        _playlistPicker.SelectedIndexChanged -= PlaylistPicker_SelectedIndexChanged;
+        try
+        {
+            _playlistPicker.Items.Clear();
+            _playlistPicker.Items.AddRange([.. items]);
+            var index = items.IndexOf(remembered ?? AutomaticPlaylistsOption);
+            _playlistPicker.SelectedIndex = Math.Max(0, index);
+        }
+        finally
+        {
+            _playlistPicker.SelectedIndexChanged += PlaylistPicker_SelectedIndexChanged;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1966,6 +2144,8 @@ public sealed class MainForm : Form
         _discogsToken.Text = settings.Sources.FirstOrDefault(static s => s.Id == TagSources.Discogs)?.Token ?? string.Empty;
         _alwaysQueryAll.Checked = settings.QueryAllSources;
         _includeLyrics.Checked = settings.IncludeLyrics;
+        _rememberedPlaylistName = ResolveRememberedPlaylist(settings.LastRescanPlaylistName);
+        SeedPlaylistPicker();
     }
 
     private void SaveSettings()
@@ -1975,6 +2155,7 @@ public sealed class MainForm : Form
             SelectedCountries = [.. CheckedCountries()],
             QueryAllSources = _alwaysQueryAll.Checked,
             IncludeLyrics = _includeLyrics.Checked,
+            LastRescanPlaylistName = NormalizePlaylistChoice(_playlistPicker.SelectedItem as string),
             Sources =
             [
                 new TagSourceSettings { Id = TagSources.ITunes, Enabled = true, Token = null },

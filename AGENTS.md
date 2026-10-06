@@ -74,13 +74,20 @@ Instructions for AI coding agents working in this repository.
   artwork (current read from the file via `ArtworkReader`, no COM
   picture marshaling), a comparison table with a per-row "Use" checkbox
   (per-track field mask) and differences highlighted.
-- The bottom bar has a **"5. Re-scan (force match)"** action (COM mode): it
-  removes the selected tracks from the iTunes library (files stay on disk)
-  and re-adds the same files via `LibraryPlaylist.AddFile`, so Apple's match
-  engine re-evaluates uploaded tracks. There is no COM API to force a direct
-  match; expect playlist re-assignment to be needed for playlists that held
-  those tracks. `TrackRow.ReplaceTrack` swaps the backing track and clears
-  all lookup state.
+- The bottom bar has a **"5. Force re-scan (match)"** action (COM mode) with
+  a playlist picker beside it: it removes the selected tracks from the
+  iTunes library and re-adds the same files via `LibraryPlaylist.AddFile`,
+  so Apple's match engine re-evaluates uploaded tracks. Because the removal
+  can delete the underlying file, the app keeps the file bytes in memory
+  first and recreates the file at the same path when it goes missing.
+  The picker chooses where the tracks land: "(track's playlists)" restores
+  their existing plain user playlists (discovered via
+  `IITFileOrCDTrack::Playlists` before the removal; smart/system playlists
+  excluded), "(library only)" skips playlists, or a specific playlist name
+  adds the re-scanned track there too. The choice persists in
+  `AppSettings.LastRescanPlaylistName` ("(none)" for library-only).
+  `TrackRow.ReplaceTrack` swaps the backing track and clears all lookup
+  state.
 - Lyrics (optional, "Include lyrics from LRCLib" checkbox): fetched from
   lrclib.net during the update step via `Sources/LyricsClient.cs`, written
   through `ITaggableTrack.WriteLyrics` (COM `track.Lyrics` / TagLib#

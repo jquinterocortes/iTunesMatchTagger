@@ -46,8 +46,9 @@ public sealed class ITunesComClient : IDisposable
     }
 
     /// <summary>
-    /// Removes a track from the iTunes library. The file on disk is NOT
-    /// deleted, which is what the re-scan flow relies on.
+    /// Removes a track from the iTunes library. Depending on the iTunes
+    /// version this may also delete (or trash) the underlying file, so
+    /// callers must keep a copy of the bytes first.
     /// </summary>
     public void RemoveFromLibrary(ComTrack track) => track.Raw.Delete();
 
@@ -63,6 +64,134 @@ public sealed class ITunesComClient : IDisposable
         dynamic tracks = operation.Tracks;
         int count = (int)tracks.Count;
         return count == 0 ? null : new ComTrack(tracks[1]); // 1-based
+    }
+
+    /// <summary>
+    /// Names of the plain user playlists of the Music library (no smart
+    /// or special/system playlists), sorted alphabetically.
+    /// </summary>
+    public IReadOnlyList<string> GetUserPlaylistNames()
+    {
+        var names = new List<string>();
+        dynamic playlists = Application.LibrarySource.Playlists;
+        int count = (int)playlists.Count;
+        for (int i = 1; i <= count; i++)
+        {
+            var name = TryGetAsPlainUserPlaylist(playlists[i]);
+            if (name is not null)
+            {
+                names.Add(name);
+            }
+        }
+
+        return [.. names.Order(StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>
+    /// Plain user playlists currently containing the track (via
+    /// IITFileOrCDTrack::Playlists). Library/smart/special playlists excluded.
+    /// </summary>
+    public IReadOnlyList<string> GetTrackPlaylistNames(ComTrack track)
+    {
+        var names = new List<string>();
+        try
+        {
+            dynamic playlists = track.Raw.Playlists;
+            int count = (int)playlists.Count;
+            for (int i = 1; i <= count; i++)
+            {
+                var name = TryGetAsPlainUserPlaylist(playlists[i]);
+                if (name is not null)
+                {
+                    names.Add(name);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+        {
+            return []; // discovery unavailable; callers log and fall back
+        }
+
+        return [.. names.Distinct(StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>
+    /// Adds an existing library track to a named user playlist. Returns
+    /// false when the playlist does not exist or already contains the
+    /// track. Track membership check runs on TrackDatabaseID.
+    /// </summary>
+    public bool AddTrackToPlaylist(string playlistName, ComTrack track)
+    {
+        dynamic? playlist = FindUserPlaylist(playlistName);
+        if (playlist is null)
+        {
+            return false;
+        }
+
+        long databaseId = (long)((int)track.Raw.TrackDatabaseID);
+        dynamic tracks = playlist.Tracks;
+        int count = (int)tracks.Count;
+        for (int i = 1; i <= count; i++)
+        {
+            if ((long)((int)tracks[i].TrackDatabaseID) == databaseId)
+            {
+                return false; // already a member
+            }
+        }
+
+        playlist.AddTrack(track.Raw);
+        return true;
+    }
+
+    private dynamic? FindUserPlaylist(string playlistName)
+    {
+        dynamic playlists = Application.LibrarySource.Playlists;
+        int count = (int)playlists.Count;
+        for (int i = 1; i <= count; i++)
+        {
+            dynamic candidate = playlists[i];
+            var verified = TryGetAsPlainUserPlaylist(candidate);
+            if (verified is not null &&
+                string.Equals(verified, playlistName, StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Returns the playlist name when it is a plain user playlist (user
+    /// kind, not smart, not a system/special playlist); null otherwise.
+    /// </summary>
+    private static string? TryGetAsPlainUserPlaylist(dynamic playlist)
+    {
+        try
+        {
+            if ((int)playlist.Kind != 2 /* lib: ITPlaylistKindUser */)
+            {
+                return null;
+            }
+
+            if ((bool)playlist.Smart)
+            {
+                return null;
+            }
+
+            // Special kinds are the system "Music"/"Movies"/... playlists.
+            if ((int)playlist.SpecialKind != 0)
+            {
+                return null;
+            }
+
+            var name = (string)playlist.Name;
+            return name.Length > 0 ? name : null;
+        }
+        catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+        {
+            return null; // not a user playlist (no Smart/SpecialKind properties)
+        }
     }
 
     public void Dispose()
