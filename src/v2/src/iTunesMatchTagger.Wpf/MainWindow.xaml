@@ -169,7 +169,7 @@
             <DataGridTemplateColumn Header="Apple" Width="*">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
-                  <ContentPresenter Content="{Binding SourceCells[iTunes], Mode=OneWay}" ContentTemplate="{StaticResource SourceCellTemplate}" />
+                  <ContentPresenter Content="{Binding SourceCells[itunes], Mode=OneWay}" ContentTemplate="{StaticResource SourceCellTemplate}" />
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
