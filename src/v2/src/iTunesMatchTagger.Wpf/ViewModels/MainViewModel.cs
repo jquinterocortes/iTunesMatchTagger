@@ -644,7 +644,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         var sourceIds = new List<string> { TagSources.ITunes };
-        sourceIds.AddRange(_settings.Sources.Where(static s => s.Enabled).Select(static s => s.Id));
+        sourceIds.AddRange(_settings.Sources
+            .Where(s => s.Enabled && s.Id != TagSources.ITunes)
+            .Select(static s => s.Id)
+            .Distinct());
 
         foreach (var field in TrackFields.All.Where(static f => f.VisibleInOptions))
         {
