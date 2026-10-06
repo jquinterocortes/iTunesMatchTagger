@@ -74,29 +74,14 @@ Instructions for AI coding agents working in this repository.
   artwork (current read from the file via `ArtworkReader`, no COM
   picture marshaling), a comparison table with a per-row "Use" checkbox
   (per-track field mask) and differences highlighted.
-- The bottom bar has a **"5. Force re-scan (match)"** action (COM mode) with
-  a playlist picker beside it. It mirrors the manual flow that works:
-  (1) read the file bytes, (2) discover the track's plain user playlists
-  via `IITFileOrCDTrack::Playlists` (smart/system playlists excluded),
-  (3) delete the LIBRARY entry - resolved by `TrackDatabaseID`, because
-  track objects from SelectedTracks are playlist-view objects and deleting
-  one only drops the playlist membership while the Match state lives with
-  the library entry, (4) recreate the audio as a fresh copy file
-  `name (rematch).ext` (re-adding under the original path can re-link to
-  the previous iCloud upload instead of re-evaluating), (5)
-  `LibraryPlaylist.AddFile(copy)`, delete any leftover original, (6)
-  restore playlists with `IITUserPlaylist::AddTrack` (VT_DISPATCH of the
-  new library track; per-playlist try/catch). ALL of that runs on a
-  dedicated STA background thread with its own `ITunesComClient`
-  connection (RCWs are apartment-bound and library enumeration via COM
-  froze the UI for minutes), reporting through `IProgress<RescanOutcome>`.
-  The library entry is resolved first by `IITPlaylist.Search` + database
-  ID (fast) with full enumeration only as fallback. Rows are NOT
-  re-bound after a re-scan (their COM object becomes stale) - the status
-  tells the user to re-run "1. Get selected tracks". The picker: "(track's
-  playlists)" (default), "(library only)", or a specific playlist to also
-  add the track to. Choice persists in `AppSettings.LastRescanPlaylistName`
-  ("(none)" = library-only).
+- **Forcing a Match (Uploaded -> Matched) is a MANUAL process**: copy the
+  file inside its folder, delete the track in iTunes (COM/UI removal takes
+  the file with it - the UI even prompts for confirmation), re-add the copy
+  to the library and back to its playlist. An earlier automated attempt
+  ("force re-scan" button) was removed: iTunes' COM delete pops a prompt
+  and deletes the file, deleting the playlist-view track object leaves the
+  library entry (where the Match state lives) untouched, and re-adding
+  under the original path can re-link to the previous iCloud upload.
 - Lyrics (optional, "Include lyrics from LRCLib" checkbox): fetched from
   lrclib.net during the update step via `Sources/LyricsClient.cs`, written
   through `ITaggableTrack.WriteLyrics` (COM `track.Lyrics` / TagLib#

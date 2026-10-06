@@ -22,9 +22,6 @@ public sealed class AppSettings
     /// <summary>Query every enabled tag source on every lookup, even when Apple matches (slower, richer comparison).</summary>
     public bool QueryAllSources { get; set; }
 
-    /// <summary>Last playlist chosen for the force re-scan flow.</summary>
-    public string? LastRescanPlaylistName { get; set; }
-
     /// <summary>Fetch and write lyrics from LRCLib during "3. Update tracks" (synced LRC when available, plain text otherwise).</summary>
     public bool IncludeLyrics { get; set; }
 
