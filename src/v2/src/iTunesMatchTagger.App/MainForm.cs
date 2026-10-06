@@ -852,10 +852,10 @@ public sealed class MainForm : Form
 
         var confirmed = MessageBox.Show(this,
             $"Force re-scan {rescannable.Count} track(s)?\n\n" +
-            "The tracks are removed from the iTunes library and their files are re-added, so Apple's match engine evaluates them again.\n" +
-            "For every track the app keeps a copy of the file bytes in memory first, so the file is restored even if the removal deletes it.\n\n" +
-            "Playlist target:\n" +
-            $"- '{_playlistPicker.SelectedItem as string ?? AutomaticPlaylistsOption}' (tracks are re-added to their playlists afterwards).\n\n" +
+            "For each track: the library entry is deleted (the Match state lives there), the audio is recreated as a fresh copy file " +
+            "('name (rematch).ext', like a manual copy + re-add) and re-imported so Apple's match engine evaluates it again, " +
+            "then the playlist memberships are restored.\n\n" +
+            $"Playlist target: '{_playlistPicker.SelectedItem as string ?? AutomaticPlaylistsOption}'.\n\n" +
             "Continue?",
             Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
         if (confirmed != DialogResult.Yes)
@@ -890,12 +890,10 @@ public sealed class MainForm : Form
 
                     // Step 2: keep the file bytes - iTunes may delete/trash the
                     // file together with the library entry.
-                    byte[]? fileBytes = null;
-                    var fileSize = 0L;
+                    byte[]? fileBytes;
                     if (File.Exists(path))
                     {
                         fileBytes = await File.ReadAllBytesAsync(path).ConfigureAwait(true);
-                        fileSize = fileBytes.Length;
                     }
                     else
                     {
@@ -904,26 +902,47 @@ public sealed class MainForm : Form
                         continue;
                     }
 
-                    // Step 3: remove from the library (may take the file with it).
-                    _itunes.RemoveFromLibrary(oldTrack);
-                    LogDebug($"Removed from library: {path}");
-
-                    // Step 4: restore the file at the same path when it is gone.
-                    if (!File.Exists(path))
+                    // Step 3: delete the LIBRARY entry. The object from
+                    // SelectedTracks is a playlist-view object (a song in N
+                    // playlists is N track objects; the Match state lives
+                    // with the library entry), so resolve it by
+                    // TrackDatabaseID before deleting.
+                    var databaseId = (int)oldTrack.Raw.TrackDatabaseID;
+                    var libraryTrack = _itunes.FindLibraryTrack(databaseId);
+                    if (libraryTrack is null)
                     {
-                        await File.WriteAllBytesAsync(path, fileBytes).ConfigureAwait(true);
-                        LogDebug($"File was deleted by iTunes; recreated it: {path} ({fileSize} bytes)");
+                        row.SetStatus("Re-scan skipped: library entry not found", StatusKind.Error);
+                        Log($"Re-scan skipped, no library entry with database ID {databaseId}: {path}", LogSeverity.Error);
+                        continue;
                     }
 
-                    fileBytes = null; // bytes back on disk; release the copy
+                    _itunes.RemoveFromLibrary(libraryTrack);
+                    LogDebug($"Removed library entry {databaseId}: {path}");
 
-                    // Step 5: re-import (this triggers the scan/new Match evaluation).
-                    var reAdded = _itunes.AddFileToLibrary(path);
+                    // Step 4: recreate the audio as a NEW file (copy) in the
+                    // same folder - re-adding under the original path can
+                    // re-link to the previous iCloud upload ("Uploaded")
+                    // instead of re-evaluating the match. Mirrors the manual
+                    // flow: copy -> delete -> add the copy.
+                    var copyPath = BuildRematchCopyPath(path);
+                    await File.WriteAllBytesAsync(copyPath, fileBytes).ConfigureAwait(true);
+                    fileBytes = null; // bytes now on disk as the copy
+
+                    // Step 5: re-import the copy (triggers a fresh scan).
+                    var reAdded = _itunes.AddFileToLibrary(copyPath);
                     if (reAdded is null)
                     {
-                        row.SetStatus("Re-scan failed: iTunes did not re-add the file (it is still on disk)", StatusKind.Error);
-                        Log($"Re-scan: iTunes did not re-add '{path}'", LogSeverity.Error);
+                        row.SetStatus($"Re-scan failed: iTunes did not re-add the file (copy left at '{copyPath}')", StatusKind.Error);
+                        Log($"Re-scan: iTunes did not re-add '{copyPath}'", LogSeverity.Error);
                         continue;
+                    }
+
+                    // the original file is left over when the COM delete did
+                    // not take it; the library now references the copy
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                        LogDebug($"Removed leftover original: {path}");
                     }
 
                     // Step 6: bring the playlists back (smart/system ones excluded).
@@ -955,16 +974,17 @@ public sealed class MainForm : Form
                     var playlistSuffix = restored.Count > 0
                         ? $", back in {restored.Count} playlist(s): {string.Join(", ", restored)}"
                         : string.Empty;
+                    var fileSuffix = $" (library file now '{Path.GetFileName(copyPath)}')";
 
                     if (reAdded.TrackId > 0)
                     {
                         row.SetStatus($"Re-scanned: now '{kind}' (catalog ID {reAdded.TrackId}){playlistSuffix}", StatusKind.Success);
-                        Log($"Re-scanned: '{kind}' with catalog ID {reAdded.TrackId}{playlistSuffix}: {path}");
+                        Log($"Re-scanned: '{kind}' with catalog ID {reAdded.TrackId}{playlistSuffix}: {copyPath}");
                     }
                     else
                     {
                         row.SetStatus($"Re-scanned: Apple is evaluating ({kind}){playlistSuffix} - check again in a few minutes", StatusKind.Warning);
-                        Log($"Re-scanned: still '{kind}', Apple is evaluating{playlistSuffix}: {path}", LogSeverity.Warning);
+                        Log($"Re-scanned: still '{kind}', Apple is evaluating{playlistSuffix}: {copyPath}", LogSeverity.Warning);
                     }
 
                     if (failed.Count > 0)
@@ -1007,6 +1027,26 @@ public sealed class MainForm : Form
         {
             return "unknown kind";
         }
+    }
+
+    /// <summary>
+    /// Path for the re-match copy: same folder, same extension, name like
+    /// "song (rematch).m4a" - unique if such a copy already exists.
+    /// </summary>
+    private static string BuildRematchCopyPath(string path)
+    {
+        var directory = Path.GetDirectoryName(path) ?? ".";
+        var stem = Path.GetFileNameWithoutExtension(path);
+        var extension = Path.GetExtension(path);
+
+        var candidate = Path.Combine(directory, $"{stem} (rematch){extension}");
+        var counter = 1;
+        while (File.Exists(candidate))
+        {
+            candidate = Path.Combine(directory, $"{stem} (rematch {++counter}){extension}");
+        }
+
+        return candidate;
     }
 
     /// <summary>Repaints the list and the detail panel for the currently selected row.</summary>

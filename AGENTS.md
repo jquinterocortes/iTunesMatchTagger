@@ -75,19 +75,22 @@ Instructions for AI coding agents working in this repository.
   picture marshaling), a comparison table with a per-row "Use" checkbox
   (per-track field mask) and differences highlighted.
 - The bottom bar has a **"5. Force re-scan (match)"** action (COM mode) with
-  a playlist picker beside it: it removes the selected tracks from the
-  iTunes library and re-adds the same files via `LibraryPlaylist.AddFile`,
-  so Apple's match engine re-evaluates uploaded tracks. Because the removal
-  can delete the underlying file, the app keeps the file bytes in memory
-  first and recreates the file at the same path when it goes missing.
-  The picker chooses where the tracks land: "(track's playlists)" restores
-  their existing plain user playlists (discovered via
-  `IITFileOrCDTrack::Playlists` before the removal; smart/system playlists
-  excluded), "(library only)" skips playlists, or a specific playlist name
-  adds the re-scanned track there too. The choice persists in
-  `AppSettings.LastRescanPlaylistName` ("(none)" for library-only).
-  `TrackRow.ReplaceTrack` swaps the backing track and clears all lookup
-  state.
+  a playlist picker beside it. It mirrors the manual flow that works:
+  (1) read the file bytes, (2) discover the track's plain user playlists
+  via `IITFileOrCDTrack::Playlists` (smart/system playlists excluded),
+  (3) delete the LIBRARY entry - resolved by `TrackDatabaseID`, because
+  track objects from SelectedTracks are playlist-view objects and deleting
+  one only drops the playlist membership while the Match state lives with
+  the library entry, (4) recreate the audio as a fresh copy file
+  `name (rematch).ext` (re-adding under the original path can re-link to
+  the previous iCloud upload instead of re-evaluating), (5)
+  `LibraryPlaylist.AddFile(copy)`, delete any leftover original, (6)
+  restore playlists with `IITUserPlaylist::AddTrack` (VT_DISPATCH of the
+  new library track; per-playlist try/catch). The picker: "(track's
+  playlists)" (default), "(library only)", or a specific playlist to also
+  add the track to. Choice persists in `AppSettings.LastRescanPlaylistName`
+  ("(none)" = library-only). `TrackRow.ReplaceTrack` swaps the backing
+  track and clears all lookup state.
 - Lyrics (optional, "Include lyrics from LRCLib" checkbox): fetched from
   lrclib.net during the update step via `Sources/LyricsClient.cs`, written
   through `ITaggableTrack.WriteLyrics` (COM `track.Lyrics` / TagLib#

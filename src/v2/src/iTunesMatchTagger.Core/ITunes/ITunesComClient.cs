@@ -46,6 +46,28 @@ public sealed class ITunesComClient : IDisposable
     }
 
     /// <summary>
+    /// Finds the LIBRARY representation of a song by its TrackDatabaseID.
+    /// This matters: track objects obtained from SelectedTracks are
+    /// playlist-view objects - deleting one only removes the playlist
+    /// membership, while the Match state lives with the library entry.
+    /// </summary>
+    public ComTrack? FindLibraryTrack(long trackDatabaseId)
+    {
+        dynamic tracks = Application.LibraryPlaylist.Tracks;
+        int count = (int)tracks.Count;
+        for (int i = 1; i <= count; i++)
+        {
+            dynamic candidate = tracks[i];
+            if ((int)candidate.TrackDatabaseID == trackDatabaseId)
+            {
+                return new ComTrack(candidate);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Removes a track from the iTunes library. Depending on the iTunes
     /// version this may also delete (or trash) the underlying file, so
     /// callers must keep a copy of the bytes first.
