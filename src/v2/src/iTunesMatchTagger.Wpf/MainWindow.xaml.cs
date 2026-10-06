@@ -11,6 +11,7 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
     private bool _updatingPicker;
+    private TrackRowViewModel? _watchedRow;
 
     public MainWindow()
     {
@@ -39,9 +40,36 @@ public partial class MainWindow : Window
     {
         if (e.PropertyName == nameof(MainViewModel.SelectedRow))
         {
+            WatchRow(_viewModel.SelectedRow);
             RefreshDetail();
         }
     }
+
+    /// <summary>
+    /// The selected row keeps changing after selection (lookup outcomes,
+    /// candidate picks, update writes) - keep the picker and the artwork
+    /// strip in sync with it.
+    /// </summary>
+    private void WatchRow(TrackRowViewModel? row)
+    {
+        if (ReferenceEquals(_watchedRow, row))
+        {
+            return;
+        }
+
+        if (_watchedRow is not null)
+        {
+            _watchedRow.PropertyChanged -= OnWatchedRowChanged;
+        }
+
+        _watchedRow = row;
+        if (_watchedRow is not null)
+        {
+            _watchedRow.PropertyChanged += OnWatchedRowChanged;
+        }
+    }
+
+    private void OnWatchedRowChanged(object? sender, PropertyChangedEventArgs e) => RefreshDetail();
 
     private void RefreshDetail()
     {

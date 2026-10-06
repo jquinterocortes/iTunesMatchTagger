@@ -333,8 +333,11 @@ public sealed class TrackRowViewModel : INotifyPropertyChanged
         // cheap cache: rerender only when the embedded image actually changes
         var bytes = Track.Location is { Length: > 0 } path ? ArtworkReader.ReadFrontCover(path) : null;
         _thumbnailFor = BuildThumbnail;
-        _lastThumbnailSide = bytes;
-        ThumbnailChanged?.Invoke();
+        if (!ReferenceEquals(_lastThumbnailSide, bytes))
+        {
+            _lastThumbnailSide = bytes;
+            _currentArtwork = bytes;
+        }
     }
 
     private BitmapImage? BuildThumbnail(string path)
@@ -342,8 +345,6 @@ public sealed class TrackRowViewModel : INotifyPropertyChanged
         var bytes = _lastThumbnailSide ?? ArtworkReader.ReadFrontCover(path);
         return bytes is null ? null : Imaging.FromBytes(bytes);
     }
-
-    internal event Action? ThumbnailChanged;
 
     public void SetStatus(string message, StatusKind severity)
     {
