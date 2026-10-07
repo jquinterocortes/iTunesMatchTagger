@@ -17,8 +17,13 @@ public class TrackFieldsTests
     [Fact]
     public void Visible_AllFieldsCheckedByDefault()
     {
-        // product decision: every offered field is written by default
-        Assert.All(TrackFields.Visible, static f => Assert.True(f.UpdateByDefault));
+        // product decision: every offered field is written by default, with
+        // one documented exception - Composer is opt-in because the Search
+        // API never returns it, so a default-on would erase composers
+        var composer = Assert.Single(TrackFields.All, f => f.LookupMember == "composer");
+        Assert.True(composer.VisibleInOptions);
+        Assert.False(composer.UpdateByDefault);
+        Assert.All(TrackFields.Visible.Where(f => f != composer), f => Assert.True(f.UpdateByDefault));
 
         // upstream "Filename" option had ShowOption = false
         var filename = Assert.Single(TrackFields.All, f => f.LookupMember == "Filename");

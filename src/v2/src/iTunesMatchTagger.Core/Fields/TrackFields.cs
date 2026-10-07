@@ -130,6 +130,24 @@ public static class TrackFields
             UpdateByDefault: true);
 
     /// <summary>
+    /// Composer. Written by default in "update mode" per the upstream app's
+    /// field table. OPT-IN: unchecked by default because Apple's Search API
+    /// does not return a composer at all, MusicBrainz needs an extra
+    /// work/recording lookup and Discogs/Deezer rarely have one - proposal
+    /// values are usually empty, so checking it by default would only erase
+    /// composers. When a source does provide it, it writes like any other.
+    /// </summary>
+    public static readonly TrackField Composer =
+        new("Composer", "composer",
+            GetFromLookup: _ => null,
+            GetFromCandidate: c => c.Composer,
+            GetFromItunes: t => (string?)t.Composer,
+            SetOnItunes: (t, v) => t.Composer = v,
+            GetFromFileTag: t => t.Composers.FirstOrDefault(),
+            SetOnFileTag: (t, v) => t.Composers = AsArray(v),
+            UpdateByDefault: false);
+
+    /// <summary>
     /// Read-only file location, shown as a grid column only (mirrors the
     /// upstream "Filename" option with <c>ShowOption = false</c>).
     /// </summary>
@@ -145,7 +163,7 @@ public static class TrackFields
     public static readonly IReadOnlyList<TrackField> All =
     [
         TrackName, ArtistName, AlbumArtist, AlbumName, Year, Genre,
-        TrackNumber, TrackCount, DiscNumber, DiscCount, Artwork, Filename,
+        TrackNumber, TrackCount, DiscNumber, DiscCount, Composer, Artwork, Filename,
     ];
 
     /// <summary>Fields offered in the "fields to update" grid.</summary>

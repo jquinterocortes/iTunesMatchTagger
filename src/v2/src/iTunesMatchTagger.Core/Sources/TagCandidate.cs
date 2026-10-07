@@ -35,6 +35,9 @@ public sealed class TagCandidate
     /// <summary>URL of the album artwork at display size, or null.</summary>
     public string? ArtworkUrl { get; init; }
 
+    /// <summary>Composer, when the source provides it (usually empty).</summary>
+    public string? Composer { get; init; }
+
     /// <summary>Optional one-line extra detail shown in the candidate picker (release format, storefront, ...).</summary>
     public string? Details { get; init; }
 }
