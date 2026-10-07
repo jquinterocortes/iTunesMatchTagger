@@ -130,7 +130,15 @@ public sealed class ComTrack : ITaggableTrack
             return;
         }
 
-        field.SetOnItunes(Raw, writeValue);
+        try
+        {
+            field.SetOnItunes(Raw, writeValue);
+        }
+        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+        {
+            // property not present in this iTunes version (e.g. Movement*
+            // on old installs) - skip the field, never the whole write
+        }
     }
 
     public void WriteArtwork(byte[] imageBytes)

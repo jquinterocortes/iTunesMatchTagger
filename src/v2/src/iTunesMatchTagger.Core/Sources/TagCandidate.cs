@@ -38,6 +38,23 @@ public sealed class TagCandidate
     /// <summary>Composer, when the source provides it (usually empty).</summary>
     public string? Composer { get; init; }
 
+    /// <summary>Library-side extras: sources normally leave these null (COM-only fields).</summary>
+    public string? Comment { get; init; }
+
+    public string? Grouping { get; init; }
+
+    public int? BPM { get; init; }
+
+    public bool? Compilation { get; init; }
+
+    public string? MovementName { get; init; }
+
+    public int? MovementNumber { get; init; }
+
+    public int? MovementCount { get; init; }
+
+    public string? MovementWork { get; init; }
+
     /// <summary>Optional one-line extra detail shown in the candidate picker (release format, storefront, ...).</summary>
     public string? Details { get; init; }
 }

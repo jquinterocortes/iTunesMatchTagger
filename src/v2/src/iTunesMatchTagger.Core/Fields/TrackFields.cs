@@ -130,12 +130,10 @@ public static class TrackFields
             UpdateByDefault: true);
 
     /// <summary>
-    /// Composer. Written by default in "update mode" per the upstream app's
-    /// field table. OPT-IN: unchecked by default because Apple's Search API
-    /// does not return a composer at all, MusicBrainz needs an extra
-    /// work/recording lookup and Discogs/Deezer rarely have one - proposal
-    /// values are usually empty, so checking it by default would only erase
-    /// composers. When a source does provide it, it writes like any other.
+    /// Composer. OPT-IN: Apple's Search API does not return a composer,
+    /// MusicBrainz needs an extra work/recording lookup and Discogs/Deezer
+    /// rarely have one - when a source provides it, it writes like any
+    /// other field.
     /// </summary>
     public static readonly TrackField Composer =
         new("Composer", "composer",
@@ -145,6 +143,84 @@ public static class TrackFields
             SetOnItunes: (t, v) => t.Composer = v,
             GetFromFileTag: t => t.Composers.FirstOrDefault(),
             SetOnFileTag: (t, v) => t.Composers = AsArray(v),
+            UpdateByDefault: false);
+
+    /// <summary>
+    /// Fields that exist in the iTunes library (COM) but that neither the
+    /// Search API nor the tag sources provide: offered for reading and
+    /// comparison, and written only through a user-set Overwrite value.
+    /// All opt-in by default.
+    /// </summary>
+    public static readonly TrackField Comment =
+        new("Comment", "comment",
+            GetFromLookup: _ => null,
+            GetFromCandidate: c => c.Comment,
+            GetFromItunes: t => (string?)t.Comment,
+            SetOnItunes: (t, v) => t.Comment = v,
+            GetFromFileTag: t => t.Comment,
+            SetOnFileTag: (t, v) => t.Comment = AsString(v),
+            UpdateByDefault: false);
+
+    public static readonly TrackField Grouping =
+        new("Grouping", "grouping",
+            GetFromLookup: _ => null,
+            GetFromCandidate: c => c.Grouping,
+            GetFromItunes: t => (string?)t.Grouping,
+            SetOnItunes: (t, v) => t.Grouping = v,
+            GetFromFileTag: t => t.Grouping,
+            SetOnFileTag: (t, v) => t.Grouping = AsString(v),
+            UpdateByDefault: false);
+
+    public static readonly TrackField BPM =
+        new("BPM", "bpm",
+            GetFromLookup: _ => null,
+            GetFromCandidate: c => c.BPM,
+            GetFromItunes: t => (int?)t.BPM,
+            SetOnItunes: (t, v) => t.BPM = v,
+            CoerceWrite: CoerceInt,
+            UpdateByDefault: false);
+
+    public static readonly TrackField Compilation =
+        new("Compilation", "compilation",
+            GetFromLookup: _ => null,
+            GetFromCandidate: c => c.Compilation,
+            GetFromItunes: t => (bool?)t.Compilation,
+            SetOnItunes: (t, v) => t.Compilation = v is bool b && b,
+            CoerceWrite: CoerceBool,
+            UpdateByDefault: false);
+
+    public static readonly TrackField MovementName =
+        new("Movement Name", "movementName",
+            GetFromLookup: _ => null,
+            GetFromCandidate: c => c.MovementName,
+            GetFromItunes: t => (string?)t.MovementName,
+            SetOnItunes: (t, v) => t.MovementName = v,
+            UpdateByDefault: false);
+
+    public static readonly TrackField MovementNumber =
+        new("Movement Number", "movementNumber",
+            GetFromLookup: _ => null,
+            GetFromCandidate: c => c.MovementNumber,
+            GetFromItunes: t => (int?)t.MovementNumber,
+            SetOnItunes: (t, v) => t.MovementNumber = v,
+            CoerceWrite: CoerceInt,
+            UpdateByDefault: false);
+
+    public static readonly TrackField MovementCount =
+        new("Movement Count", "movementCount",
+            GetFromLookup: _ => null,
+            GetFromCandidate: c => c.MovementCount,
+            GetFromItunes: t => (int?)t.MovementCount,
+            SetOnItunes: (t, v) => t.MovementCount = v,
+            CoerceWrite: CoerceInt,
+            UpdateByDefault: false);
+
+    public static readonly TrackField MovementWork =
+        new("Movement Work", "movementWork",
+            GetFromLookup: _ => null,
+            GetFromCandidate: c => c.MovementWork,
+            GetFromItunes: t => (string?)t.MovementWork,
+            SetOnItunes: (t, v) => t.MovementWork = v,
             UpdateByDefault: false);
 
     /// <summary>
@@ -163,7 +239,10 @@ public static class TrackFields
     public static readonly IReadOnlyList<TrackField> All =
     [
         TrackName, ArtistName, AlbumArtist, AlbumName, Year, Genre,
-        TrackNumber, TrackCount, DiscNumber, DiscCount, Composer, Artwork, Filename,
+        TrackNumber, TrackCount, DiscNumber, DiscCount,
+        Composer, Comment, Grouping, BPM, Compilation,
+        MovementName, MovementNumber, MovementCount, MovementWork,
+        Artwork, Filename,
     ];
 
     /// <summary>Fields offered in the "fields to update" grid.</summary>
@@ -171,6 +250,9 @@ public static class TrackFields
 
     internal static object? CoerceInt(object? value) =>
         int.TryParse(value?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
+
+    internal static object? CoerceBool(object? value) =>
+        bool.TryParse(value?.ToString(), out var parsed) ? parsed : null;
 
     private static string AsString(object? value) => value?.ToString() ?? string.Empty;
 
