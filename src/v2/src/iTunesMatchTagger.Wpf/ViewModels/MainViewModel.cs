@@ -527,7 +527,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        var active = Options.Where(static o => o.Update).ToList();
+        // always-write fields (hidden from the UI) join the option-driven set
+        var alwaysWrite = TrackFields.All.Where(static f => f.AlwaysWrite)
+            .Select(static f => (Field: f, Update: true, Overwrite: false, OverwriteValue: (string?)null));
+
+        var active = Options.Where(static o => o.Update)
+            .Select(static o => (Field: o.Field, o.Update, o.Overwrite, o.OverwriteValue))
+            .Concat(alwaysWrite)
+            .ToList();
         if (active.Count == 0)
         {
             Log("No update fields checked (Settings > Fields).", StatusKind.Error);

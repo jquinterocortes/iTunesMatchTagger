@@ -29,5 +29,13 @@ public sealed record TrackField(
     bool VisibleInOptions = true,
     string? NullValue = null)
 {
+    /// <summary>
+    /// True for fields that are hidden from the UI (no comparison row, no
+    /// options entry) but still included in every update when a proposal
+    /// value exists. Only makes sense together with
+    /// <see cref="VisibleInOptions"/> = false.
+    /// </summary>
+    public bool AlwaysWrite => !VisibleInOptions && SetOnItunes is not null;
+
     public override string ToString() => DisplayName;
 }

@@ -147,9 +147,9 @@ public static class TrackFields
 
     /// <summary>
     /// Fields that exist in the iTunes library (COM) but that neither the
-    /// Search API nor the tag sources provide: offered for reading and
-    /// comparison, and written only through a user-set Overwrite value.
-    /// All opt-in by default.
+    /// Search API nor the tag sources provide: hidden from the UI, yet
+    /// always included in updates (nothing is written unless a source
+    /// someday proposes a value).
     /// </summary>
     public static readonly TrackField Comment =
         new("Comment", "comment",
@@ -159,7 +159,7 @@ public static class TrackFields
             SetOnItunes: (t, v) => t.Comment = v,
             GetFromFileTag: t => t.Comment,
             SetOnFileTag: (t, v) => t.Comment = AsString(v),
-            UpdateByDefault: false);
+            VisibleInOptions: false);
 
     public static readonly TrackField Grouping =
         new("Grouping", "grouping",
@@ -169,7 +169,7 @@ public static class TrackFields
             SetOnItunes: (t, v) => t.Grouping = v,
             GetFromFileTag: t => t.Grouping,
             SetOnFileTag: (t, v) => t.Grouping = AsString(v),
-            UpdateByDefault: false);
+            VisibleInOptions: false);
 
     public static readonly TrackField BPM =
         new("BPM", "bpm",
@@ -178,7 +178,7 @@ public static class TrackFields
             GetFromItunes: t => (int?)t.BPM,
             SetOnItunes: (t, v) => t.BPM = v,
             CoerceWrite: CoerceInt,
-            UpdateByDefault: false);
+            VisibleInOptions: false);
 
     public static readonly TrackField Compilation =
         new("Compilation", "compilation",
@@ -187,7 +187,7 @@ public static class TrackFields
             GetFromItunes: t => (bool?)t.Compilation,
             SetOnItunes: (t, v) => t.Compilation = v is bool b && b,
             CoerceWrite: CoerceBool,
-            UpdateByDefault: false);
+            VisibleInOptions: false);
 
     public static readonly TrackField MovementName =
         new("Movement Name", "movementName",
@@ -195,7 +195,7 @@ public static class TrackFields
             GetFromCandidate: c => c.MovementName,
             GetFromItunes: t => (string?)t.MovementName,
             SetOnItunes: (t, v) => t.MovementName = v,
-            UpdateByDefault: false);
+            VisibleInOptions: false);
 
     public static readonly TrackField MovementNumber =
         new("Movement Number", "movementNumber",
@@ -204,7 +204,7 @@ public static class TrackFields
             GetFromItunes: t => (int?)t.MovementNumber,
             SetOnItunes: (t, v) => t.MovementNumber = v,
             CoerceWrite: CoerceInt,
-            UpdateByDefault: false);
+            VisibleInOptions: false);
 
     public static readonly TrackField MovementCount =
         new("Movement Count", "movementCount",
@@ -213,7 +213,7 @@ public static class TrackFields
             GetFromItunes: t => (int?)t.MovementCount,
             SetOnItunes: (t, v) => t.MovementCount = v,
             CoerceWrite: CoerceInt,
-            UpdateByDefault: false);
+            VisibleInOptions: false);
 
     public static readonly TrackField MovementWork =
         new("Movement Work", "movementWork",
@@ -221,7 +221,7 @@ public static class TrackFields
             GetFromCandidate: c => c.MovementWork,
             GetFromItunes: t => (string?)t.MovementWork,
             SetOnItunes: (t, v) => t.MovementWork = v,
-            UpdateByDefault: false);
+            VisibleInOptions: false);
 
     /// <summary>
     /// Read-only file location, shown as a grid column only (mirrors the

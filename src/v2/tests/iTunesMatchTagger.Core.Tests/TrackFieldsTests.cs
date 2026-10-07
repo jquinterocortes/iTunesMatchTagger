@@ -17,16 +17,27 @@ public class TrackFieldsTests
     [Fact]
     public void Visible_AllFieldsCheckedByDefault()
     {
-        // product decision: every offered field is written by default, with
-        // documented exceptions - fields the Search API does not return are
-        // opt-in so a default-on could only erase existing values
-        string[] optIn =
+        // product decision: fields the Search API returns are written by
+        // default; Composer (API does not return it) is visible but opt-in;
+        // the COM-only extras (comment, grouping, bpm, compilation, movement*)
+        // are hidden from the UI and always-write (nothing to write until a
+        // source someday proposes a value)
+        var composer = Assert.Single(TrackFields.All, f => f.LookupMember == "composer");
+        Assert.True(composer.VisibleInOptions);
+        Assert.False(composer.UpdateByDefault);
+        Assert.All(TrackFields.Visible.Where(f => f != composer), f => Assert.True(f.UpdateByDefault));
+
+        string[] hiddenAlwaysWrite =
         [
-            "composer", "comment", "grouping", "bpm", "compilation",
+            "comment", "grouping", "bpm", "compilation",
             "movementName", "movementNumber", "movementCount", "movementWork",
         ];
-        Assert.All(TrackFields.Visible.Where(f => !optIn.Contains(f.LookupMember)), f => Assert.True(f.UpdateByDefault));
-        Assert.All(TrackFields.Visible.Where(f => optIn.Contains(f.LookupMember)), f => Assert.False(f.UpdateByDefault));
+        Assert.All(hiddenAlwaysWrite, member =>
+        {
+            var field = Assert.Single(TrackFields.All, f => f.LookupMember == member);
+            Assert.False(field.VisibleInOptions);
+            Assert.True(field.AlwaysWrite);
+        });
 
         // upstream "Filename" option had ShowOption = false
         var filename = Assert.Single(TrackFields.All, f => f.LookupMember == "Filename");
