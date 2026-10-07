@@ -181,7 +181,7 @@ public static class TrackLookupService
             try
             {
                 previews[candidateIndex] = await artworkHttp.GetByteArrayAsync(
-                    ITunesSearchClient.SizedArtworkUrl(url, 300), cancellationToken).ConfigureAwait(false);
+                    ITunesSearchClient.SizedArtworkUrl(url, 600), cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
             {

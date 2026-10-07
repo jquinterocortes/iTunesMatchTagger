@@ -29,12 +29,12 @@
 
     <!-- cell template used by the Current + per-source comparison columns -->
     <DataTemplate x:Key="SourceCellTemplate">
-      <Grid>
+      <StackPanel>
         <Image Height="96" Stretch="Uniform" HorizontalAlignment="Left" Margin="1"
                Source="{Binding Image, Mode=OneWay}"
                Visibility="{Binding Image, Converter={StaticResource NullToCollapsed}}" />
-        <TextBlock Text="{Binding Text, Mode=OneWay}"
-                   Visibility="{Binding Image, Converter={StaticResource NullToVisible}}">
+        <TextBlock Text="{Binding Text, Mode=OneWay}" MaxWidth="200" ToolTip="{Binding Text, Mode=OneWay}"
+                   Foreground="{DynamicResource Subtle}" FontSize="11" Margin="0,1,0,0">
           <TextBlock.Style>
             <Style TargetType="TextBlock" BasedOn="{StaticResource FieldText}">
               <Style.Triggers>
@@ -46,7 +46,7 @@
             </Style>
           </TextBlock.Style>
         </TextBlock>
-      </Grid>
+      </StackPanel>
     </DataTemplate>
     <!-- hides the Use checkbox on display-only rows (Artwork Preview) -->
     <Style x:Key="UseCellCheckBoxStyle" TargetType="CheckBox">

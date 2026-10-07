@@ -555,4 +555,28 @@ public static class Imaging
             return null;
         }
     }
+
+    /// <summary>Describes an image: real pixel dimensions, format and file size.</summary>
+    public static string? DescribeBytes(byte[]? bytes)
+    {
+        if (bytes is not { Length: > 0 })
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = new MemoryStream(bytes);
+            var frame = BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+            var format = bytes.Length >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47
+                ? "PNG"
+                : bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF ? "JPEG"
+                : frame.Format.ToString();
+            return $"{frame.PixelWidth}×{frame.PixelHeight} · {format} · {bytes.Length / 1024d:0} KB";
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
 }

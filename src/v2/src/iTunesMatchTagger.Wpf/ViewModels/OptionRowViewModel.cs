@@ -141,9 +141,15 @@ public sealed class FieldComparisonRowViewModel : INotifyPropertyChanged
     /// <summary>Repaints every binding after any data change.</summary>
     public void Refresh()
     {
-        CurrentCell = RenderImages
-            ? new SourceCell(string.Empty, false, Imaging.FromBytes(_row.CurrentArtwork))
-            : new SourceCell(Current, false);
+        if (RenderImages)
+        {
+            var currentBytes = _row.CurrentArtwork;
+            CurrentCell = new SourceCell(Imaging.DescribeBytes(currentBytes) ?? string.Empty, false, Imaging.FromBytes(currentBytes));
+        }
+        else
+        {
+            CurrentCell = new SourceCell(Current, false);
+        }
 
         foreach (var sourceId in _sourceIds)
         {
@@ -152,11 +158,17 @@ public sealed class FieldComparisonRowViewModel : INotifyPropertyChanged
                 ? string.Empty
                 : Field.GetFromCandidate?.Invoke(candidate)?.ToString() ?? string.Empty;
 
-            var image = RenderImages && candidate is not null
-                ? Imaging.FromBytes(_row.GetCandidateArtwork(_row.CandidateIndexForSource(sourceId)))
-                : null;
-
-            _sourceCells[sourceId] = new SourceCell(text, !string.Equals(text, Current, StringComparison.Ordinal), image);
+            if (RenderImages)
+            {
+                // the preview row shows dimensions/format/size under the image;
+                // IsDifferent is meaningless there (it is display only)
+                var bytes = candidate is not null ? _row.GetCandidateArtwork(_row.CandidateIndexForSource(sourceId)) : null;
+                _sourceCells[sourceId] = new SourceCell(Imaging.DescribeBytes(bytes) ?? string.Empty, false, Imaging.FromBytes(bytes));
+            }
+            else
+            {
+                _sourceCells[sourceId] = new SourceCell(text, !string.Equals(text, Current, StringComparison.Ordinal), null);
+            }
         }
 
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
