@@ -72,6 +72,10 @@ resolved from the registry.
       Settings dialog, resizable track list / detail split, collapsible log
       drawer (in progress; WinForms kept until parity)
 - [ ] Candidate quality: MusicBrainz track/disc numbers (needs release lookup), genre via `/recording/{mbid}`
+- [ ] Candidate extras for the hidden always-write fields: Composer and
+      Movement* via MusicBrainz recording/release lookups, BPM from Discogs
+      (the fields are already in the catalog and write automatically when a
+      source proposes them)
 - [ ] CI workflow (build + test on windows-latest)
 - [ ] Release packaging (self-contained single-file exe)
 
